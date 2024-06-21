@@ -183,9 +183,7 @@ pleskChecker(){
 }
 
 checker1(){
-	local _service=$1
-	local _binary=$2
-	local _hostname=$(hostname --fqdn)
+	local _service=$1 _binary=$2 _hostname=$(hostname --fqdn)
 
 	printf \
 		"\n%s[+] Checking if %s Binary is installed...%s\n" \
@@ -1464,6 +1462,129 @@ mySQLRamDisk(){
 	return 0
 }
 
+clamAVChecker(){
+	local _service _package _hostname=$( hostname --long ) _clamAVStatus=0 			# _clamAVStatus -> ClamAVSuite installed or not
+	local -A _clamAVSuite=(
+		
+		[clamav-daemon.service]="clamd"
+		[clamav-freshclam.service]="freshclam"
+	)
+
+	local -a _clamAVPackages=(
+		
+		clamav-daemon
+		clamav-freshclam
+	)
+
+	printf \
+		"\n%s[+] Checking if ClamAV is installed on %s %s\n" \
+		"${BLUE}" "${_hostname}" "${RESET}"
+
+	for _service in "${!_clamAVSuite[@]}"; do 
+
+		checker1 "${_service}" "${_clamAVSuite[${_service}]}" || (( _clamAVStatus++ ))
+	done
+
+	(( $_clamAVStatus != 0 )) && {
+
+		printf >&2 \
+			"\n%s[!] Some ClamAV's Component seems to be not installed %s\n" \
+			"${RED}" "${RESET}"
+	} || {
+		printf \
+			"\n%s[+] ClamAV Suite seems to be installed correctly %s\n" \
+			"${GREEN}" "${RESET}"
+		return 0
+	}
+
+	printf \
+		"\n%s[+] Perhaps ClamAV Service's are not Active | Running. Let's Check ClamAV's Packages %s\n" \
+		"${BLUE}" "${RESET}"
+
+	printf \
+		"%s[+] Checking if [ clamav-daemon | clamav-freshclam ] packages are installed on %s...%s\n" \
+		"${BLUE}" "${_hostname}" "${RESET}"
+
+	for _package in "${_clamAVPackages[@]}"; do
+
+		grep --quiet \
+		     '^Status: install ok installed$' \
+		     < <( dpkg --status \
+			       "${_package}" \
+			       2> /dev/null
+			)
+
+		(( $? == 0 )) && {
+
+			printf \
+				"%s[+] %s Package is installed %s\n" \
+				"${GREEN}" "${_package}" "${RESET}"
+		} || {
+			printf >&2 \
+				"%s[!] %s Package not installed :( %s\n" \
+				"${RED}" "${_package}" "${RESET}"
+			return 1
+		}
+	done
+
+	printf >&2 \
+		"%s[!] There seems to be a problem with ClamAV's services %s\n" \
+		"${RED}" "${RESET}"
+
+	printf \
+		"%s[+] Restarting ClamAV's services on %s %s\n" \
+		"${BLUE}" "${_hostname}" "${RESET}"
+
+	for _service in "${!_clamAVSuite[@]}" ; do systemctl --quiet restart "${_service}" 2> /dev/null; done
+
+	printf \
+		"%s[+] Checking ClamAV's services status after restart...%s\n" \
+		"${BLUE}" "${RESET}"
+
+	_clamAVStatus=0
+
+	for _service in "${!_clamAVSuite[@]}" ; do 
+
+		if systemctl --quiet is-active "${_service}" ; then
+
+			printf \
+				"%s[+] %s is Active | Running :) %s\n" \
+				"${GREEN}" "${_service}" "${RESET}"
+		else
+
+			printf >&2 \
+				"%s[!] %s is Inactive | Not Running :( %s\n" \
+				"${RED}" "${_service}" "${RESET}"
+
+			(( _clamAVStatus++ ))
+		fi
+
+	done
+
+	(( $_clamAVStatus == 0 )) && return 0
+
+	printf \
+		"%s[!] There seems to be a problem with ClamAV's Services. Check it out! ( Try Journalctl command ) %s \n" \
+		"${PURPLE}" "${RESET}"
+
+	exit 99
+
+}
+
+clamAVSetup(){
+	local _hostname=$( hostname --long )
+
+	if ! clamAVChecker ; then
+
+		printf \
+			"%s[+] Installing | Reinstalling ClamAV Packages ( clamav-daemon | clamav-freshclam ) on %s...%s\n" \
+			"${BLUE}" "${_hostname}" "${RESET}"
+
+	else
+		pass
+	fi
+}
+
 main(){
 	local -A flags=()
 	local -A optArgs=()
@@ -1537,21 +1658,25 @@ ADVISE
 
 	checkService 		|| exit 1
 
-	table " Plesk Email Security"
+	#table " Plesk Email Security"
 
-	pleskEmailSecurity "${_pleskSecretKey}" || exit 1
+	#pleskEmailSecurity "${_pleskSecretKey}" || exit 1
 
-	table " Amavis - SpamAssassin"
+	#table " Amavis - SpamAssassin"
 
-	amavisdSpamdChecker || exit 1
+	#amavisdSpamdChecker || exit 1
 
-	table "     Memory - Swap"
+	#table "     Memory - Swap"
 
-	makeSwap $( getMemoryInfo ) || exit 1	# $( Function ) : FD 1 -> Temporal Buffer -> Variable ; FD 2 -> Screen
+	#makeSwap $( getMemoryInfo ) || exit 1	# $( Function ) : FD 1 -> Temporal Buffer -> Variable ; FD 2 -> Screen
 
-	table "MySQL Ramdisk - Checking"
+	#table "MySQL Ramdisk - Checking"
 
-	mySQLRamDisk || exit 1
+	#mySQLRamDisk || exit 1
+
+	table "ClamAV Suite Section"
+
+	clamAVChecker || exit 1
 }
 
 RESET=$(tput sgr0)
