@@ -1462,6 +1462,35 @@ mySQLRamDisk(){
 	return 0
 }
 
+packageChecker(){
+	local _package=$1 _hostname=$( hostname --long )
+
+	printf \
+		"%s[+] Checking if %s package is installed on %s...%s\n" \
+		"${BLUE}" "${_package}" "${_hostname}" "${RESET}"
+
+	grep --quiet \
+	     '^Status: install ok installed$' \
+	     < <( dpkg --status \
+		       "${_package}" \
+		       2> /dev/null
+		)
+
+	(( $? == 0 )) && {
+
+		printf \
+			"%s[+] %s Package is installed %s\n" \
+			"${GREEN}" "${_package}" "${RESET}"
+		return 0
+	} || {
+		printf >&2 \
+			"%s[!] %s Package not installed :( %s\n" \
+			"${RED}" "${_package}" "${RESET}"
+		return 1
+	}
+
+}
+
 clamAVChecker(){
 	local _service _package _hostname=$( hostname --long ) _clamAVStatus=0 			# _clamAVStatus -> ClamAVSuite installed or not
 	local -A _clamAVSuite=(
@@ -1471,7 +1500,7 @@ clamAVChecker(){
 	)
 
 	local -a _clamAVPackages=(
-		
+
 		clamav-daemon
 		clamav-freshclam
 	)
@@ -1498,91 +1527,166 @@ clamAVChecker(){
 	}
 
 	printf \
-		"\n%s[+] Perhaps ClamAV Service's are not Active | Running. Let's Check ClamAV's Packages %s\n" \
+		"%s[+] Perhaps ClamAV Service's are not Active | Running. Let's Check ClamAV's Packages %s\n" \
 		"${BLUE}" "${RESET}"
 
-	printf \
-		"%s[+] Checking if [ clamav-daemon | clamav-freshclam ] packages are installed on %s...%s\n" \
-		"${BLUE}" "${_hostname}" "${RESET}"
+	for _package in "${_clamAVPackages[@]}" ; do
 
-	for _package in "${_clamAVPackages[@]}"; do
-
-		grep --quiet \
-		     '^Status: install ok installed$' \
-		     < <( dpkg --status \
-			       "${_package}" \
-			       2> /dev/null
-			)
-
-		(( $? == 0 )) && {
-
-			printf \
-				"%s[+] %s Package is installed %s\n" \
-				"${GREEN}" "${_package}" "${RESET}"
-		} || {
-			printf >&2 \
-				"%s[!] %s Package not installed :( %s\n" \
-				"${RED}" "${_package}" "${RESET}"
-			return 1
-		}
+		packageChecker "${_package}" || return 1
 	done
 
 	printf >&2 \
-		"%s[!] There seems to be a problem with ClamAV's services %s\n" \
+		"\n%s[!] There seems to be a problem with ClamAV's services %s\n" \
 		"${RED}" "${RESET}"
 
-	printf \
-		"%s[+] Restarting ClamAV's services on %s %s\n" \
-		"${BLUE}" "${_hostname}" "${RESET}"
+	while : ; do
 
-	for _service in "${!_clamAVSuite[@]}" ; do systemctl --quiet restart "${_service}" 2> /dev/null; done
+		printf \
+			"%s[+] Restarting ClamAV's services on %s %s\n" \
+			"${BLUE}" "${_hostname}" "${RESET}"
+
+		for _service in "${!_clamAVSuite[@]}" ; do systemctl --quiet restart "${_service}" 2> /dev/null; done
+
+		printf \
+			"%s[+] Checking ClamAV's services status after restart...%s\n" \
+			"${BLUE}" "${RESET}"
+
+		_clamAVStatus=0
+
+		for _service in "${!_clamAVSuite[@]}" ; do 
+
+			if systemctl --quiet is-active "${_service}" ; then
+
+				printf \
+					"%s[+] %s is Active | Running :) %s\n" \
+					"${GREEN}" "${_service}" "${RESET}"
+			else
+
+				printf >&2 \
+					"%s[!] %s is Inactive | Not Running :( %s\n" \
+					"${RED}" "${_service}" "${RESET}"
+
+				(( _clamAVStatus++ ))
+			fi
+
+		done
+
+		(( $_clamAVStatus == 0 )) && return 0
+
+		printf \
+			"%s[!] There is a problem with ClamAV's Services definitely %s \n" \
+			"${PURPLE}" "${RESET}"
+
+		read -p \
+			"${PURPLE}[+] Wait 30-60 seconds and Press Enter to Restart ClamAV's Services again${RESET}"
+	done
+}
+
+clamAVInstall(){
+	local _package _hostname=$( hostname --long )
+	local -a _clamAVPackages=(
+
+		clamav-daemon
+		clamav-freshclam
+	)
+
+	table "ClamAV Install Section"
 
 	printf \
-		"%s[+] Checking ClamAV's services status after restart...%s\n" \
+		"\n%s[+] ClamAV Suite related packages are gonna installed now on %s %s\n" \
+		"${BLUE}" "${_hostname}" "${RESET}"	
+
+	printf \
+		"%s[+] Updating the list of available packages in the repositories...%s\n" \
 		"${BLUE}" "${RESET}"
 
-	_clamAVStatus=0
-
-	for _service in "${!_clamAVSuite[@]}" ; do 
-
-		if systemctl --quiet is-active "${_service}" ; then
-
-			printf \
-				"%s[+] %s is Active | Running :) %s\n" \
-				"${GREEN}" "${_service}" "${RESET}"
-		else
-
-			printf >&2 \
-				"%s[!] %s is Inactive | Not Running :( %s\n" \
-				"${RED}" "${_service}" "${RESET}"
-
-			(( _clamAVStatus++ ))
-		fi
-
-	done
-
-	(( $_clamAVStatus == 0 )) && return 0
+	apt -qq update &> /dev/null
 
 	printf \
-		"%s[!] There seems to be a problem with ClamAV's Services. Check it out! ( Try Journalctl command ) %s \n" \
-		"${PURPLE}" "${RESET}"
+		"%s[+] Installing ClamAV Packages ( clamav-daemon | clamav-freshclam ) on %s...%s\n" \
+		"${BLUE}" "${_hostname}" "${RESET}"
 
-	exit 99
+	apt -qq install clamav-daemon clamav-freshclam &> /dev/null 
 
+	printf \
+		"%s[+] Previous mentioned packages seems to be installed correctly %s\n" \
+		"${GREEN}" "${RESET}"
 }
 
 clamAVSetup(){
-	local _hostname=$( hostname --long )
+	local _clamdConfigFile="/etc/clamav/clamd.conf" _hostname=$( hostname --long )
+	local _clamdservice="clamav-daemon.service"
 
-	if ! clamAVChecker ; then
+	clamAVChecker || {
+
+		clamAVInstall
 
 		printf \
-			"%s[+] Installing | Reinstalling ClamAV Packages ( clamav-daemon | clamav-freshclam ) on %s...%s\n" \
-			"${BLUE}" "${_hostname}" "${RESET}"
+			"%s[+] Let's Check now if ClamAV suite has been installed and It's running correctly %s\n" \
+			"${BLUE}" "${RESET}"
+
+		clamAVChecker || { 
+			
+			printf >&2 \
+				"%s[!] Something went wrong trying to install ClamAV Packages :(%s\n" \
+				"${RED}" "${RESET}"
+			printf \
+				"%s[+] Try to install these packages manually and Check Installation Logs if it fails %s\n" \
+				"${BLUE}" "${RESET}"
+
+			return 1
+		}
+	}
+
+	table "ClamAV Setup Section"
+
+	printf \
+		"%s[+] Modifying MaxDirectoryRecursion Parameter on %s file...%s\n" \
+		"${BLUE}" "${_clamdConfigFile}" "${RESET}"
+
+	[[ -e $_clamdConfigFile ]] || { printf >&2 \
+						"%s[!] %s ClamAV Configuration File does not exist on %s ( Not in default Path at least ) %s\n" \
+						"${RED}" "${_hostname}" "${RESET}"
+
+					return 1 ; }
+
+	sed --regex-extended \
+	    --in-place \
+	    's@(^MaxDirectoryRecursion)\s[0-9]+@\1 50@g' \
+	    "${_clamdConfigFile}"
+
+	if (( $? == 0 )) ; then
+
+		printf \
+			"%s[+] MaxDirectoryRecursion Parameter's value set to 50 correctly on %s :) %s\n" \
+			"${GREEN}" "${_clamdConfigFile}" "${RESET}"
+		printf \
+			"%s[+] Go Check https://github.com/4l3xBB/prepare to find out why %s\n" \
+			"${PURPLE}" "${RESET}"
+		printf \
+			"%s[+] Restarting %s to apply changes...%s\n" \
+			"${BLUE}" "${_clamdservice}" "${RESET}"
+
+		systemctl --quiet restart "${_clamdservice}" &> /dev/null && {
+
+			printf \
+				"%s[+] %s restarted correctly %s\n" \
+				"${GREEN}" "${RESET}"
+		} || {
+			printf >&2 \
+				"%s[!] Could not restart %s correctly :( . Try check Service's Status and Logs using journalctl utility%s\n" \
+				"${RED}" "${RESET}"
+
+			return 1
+		}
 
 	else
-		pass
+		printf >&2 \
+			"%s[!] Could not Set or Modify Previous Parameter on %s. Try to do it after this script %s\n" \
+			"${RED}" "${_clamdConfigFile}" "${RESET}"
 	fi
+
+	
 }
 
 main(){
@@ -1590,11 +1694,13 @@ main(){
 	local -A optArgs=()
 	local pleskSecretKey # Plesk's API REST Secret Key
 	
-	(( $# == 0 )) && { \
+	(( $# == 0 )) && {
+
 		printf >&2 \
 			"\n\t%s[!] Try -h | --help to display Info about this Script :)%s\n\n" \
 			"${BLUE}" "${RESET}"
-		exit 1 ; }
+		exit 1
+	}
 
 	while (( $# > 0 )) ; do
 
@@ -1602,15 +1708,37 @@ main(){
 
 		case "${1}" in
 
-			-[hrc][^-]* )		set -- "${1:0:2}" "-${1:2}" "${@:2}" 	; continue ;; 	# -abc Option Format
-			-[pu]?*	)		set -- "${1:0:2}" "${1:2}" "${@:2}" 	; continue ;; 	# -aSomething Option Format
+			-[hrc][^-]* )		set -- "${1:0:2}" "-${1:2}" "${@:2}"			# -abc Option Format
+						continue
+						;; 			
 
-			-h | --help )		showHelp ; exit 99 ;;
-			-u | --user )		(( flags[u]++ )) ; optArgs[user]="${2}"; shift ;;
-			-p | --password )	(( flags[p]++ )) ; optArgs[passwd]="${2}"; shift ;;
-			-r | --run )		(( flags[r]++ )) ;; 
-			-c | --check )		(( flags[c]++ )) ;;
-			-- )			shift ; break ;;
+			-[pu]?*	)		set -- "${1:0:2}" "${1:2}" "${@:2}"			# -aSomething Option Format
+						continue
+						;; 	
+
+			-h | --help )		showHelp
+						exit 0
+						;;
+
+			-u | --user )		(( flags[u]++ ))
+						optArgs[user]="${2}"
+						shift
+						;;
+
+			-p | --password )	(( flags[p]++ ))
+						optArgs[passwd]="${2}"
+						shift
+						;;
+
+			-r | --run )		(( flags[r]++ ))
+						;; 
+
+			-c | --check )		(( flags[c]++ ))
+						;;
+
+			-- )			shift ; break
+						;;
+
 			* )			printf >&2 \
 							"\n\t%s[!] Unknown Option -> %s. Try -h | --help :)%s\n\n" \
 							"${RED}" "${1##"${1%%[^-]*}"}" "${RESET}"
@@ -1620,7 +1748,7 @@ main(){
 		shift
 	done
 
-	[[ -z "${optArgs[user]}" || -z "${optArgs[passwd]}" ]] && { \
+	[[ -z "${optArgs[user]}" || -z "${optArgs[passwd]}" ]] && {
 		printf >&2 \
 			"\n%s[!] Plesk's Admin User and Password must be provided. Try -h | --help :) %s\n\n" \
 			"${RED}" "${RESET}"
@@ -1634,7 +1762,9 @@ main(){
 		${0##*/} --user=john --password=password
 	${RESET}
 ADVISE
-	exit 1 ; }
+		exit 1
+
+	}
 	
 	userTable "${optArgs[user]}" "${optArgs[passwd]}"
 
@@ -1676,7 +1806,7 @@ ADVISE
 
 	table "ClamAV Suite Section"
 
-	clamAVChecker || exit 1
+	clamAVSetup || exit 1
 }
 
 RESET=$(tput sgr0)
