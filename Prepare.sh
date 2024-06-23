@@ -1766,7 +1766,7 @@ clamAVSetup(){
 	fi
 
 	printf \
-		"%s[+] Checking 
+		"%s[+] Checking "
 }
 
 main(){
