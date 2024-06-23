@@ -1614,8 +1614,9 @@ clamAVInstall(){
 }
 
 clamAVSetup(){
-	local _clamdConfigFile="/etc/clamav/clamd.conf" _hostname=$( hostname --long )
-	local _clamdservice="clamav-daemon.service"
+	local _clamdConfigFile="/etc/clamav/clamd.conf" _hostname=$( hostname --long ) _githubReq
+	local _clamdservice="clamav-daemon.service" _clamAVConfigDir="${HOME}/.prepare" _clamAVMailer="ClamAVMailer.sh"
+	local _githubURL="https://raw.githubusercontent.com/4l3xBB/Prepare/main/ClamAV/ClamAVMailer.sh"
 
 	clamAVChecker || {
 
@@ -1641,52 +1642,131 @@ clamAVSetup(){
 	table "ClamAV Setup Section"
 
 	printf \
-		"%s[+] Modifying MaxDirectoryRecursion Parameter on %s file...%s\n" \
+		"\n%s[+] Checking Clamd's MaxDirectoryRecursion Parameter on %s...%s\n" \
 		"${BLUE}" "${_clamdConfigFile}" "${RESET}"
 
 	[[ -e $_clamdConfigFile ]] || { printf >&2 \
-						"%s[!] %s ClamAV Configuration File does not exist on %s ( Not in default Path at least ) %s\n" \
+						"\n%s[!] %s ClamAV Configuration File does not exist on %s ( Not in default Path at least ) %s\n" \
 						"${RED}" "${_hostname}" "${RESET}"
 
 					return 1 ; }
+	grep --quiet \
+	     --ignore-case \
+	     --perl-regexp \
+	     --text \
+	     '^MaxDirectoryRecursion 50$' \
+	     "${_clamdConfigFile}"
 
-	sed --regex-extended \
-	    --in-place \
-	    's@(^MaxDirectoryRecursion)\s[0-9]+@\1 50@g' \
-	    "${_clamdConfigFile}"
+	(( $? != 0 )) && {
 
-	if (( $? == 0 )) ; then
-
+		printf >&2 \
+			"%s[!] MaxDirectoryRecursion Parameter is not set correctly %s\n" \
+			"${RED}" "${RESET}"
+		
 		printf \
-			"%s[+] MaxDirectoryRecursion Parameter's value set to 50 correctly on %s :) %s\n" \
-			"${GREEN}" "${_clamdConfigFile}" "${RESET}"
-		printf \
-			"%s[+] Go Check https://github.com/4l3xBB/prepare to find out why %s\n" \
-			"${PURPLE}" "${RESET}"
-		printf \
-			"%s[+] Restarting %s to apply changes...%s\n" \
-			"${BLUE}" "${_clamdservice}" "${RESET}"
+			"\n%s[+] Modifying MaxDirectoryRecursion Parameter on %s file...%s\n" \
+			"${BLUE}" "${_clamdConfigFile}" "${RESET}"
 
-		systemctl --quiet restart "${_clamdservice}" &> /dev/null && {
+		sed --regexp-extended \
+		    --in-place \
+		    's@(^MaxDirectoryRecursion)\s[0-9]+@\1 50@g' \
+		    "${_clamdConfigFile}"
+
+		if (( $? == 0 )) ; then
 
 			printf \
-				"%s[+] %s restarted correctly %s\n" \
-				"${GREEN}" "${RESET}"
-		} || {
+				"%s[+] MaxDirectoryRecursion Parameter's value set to 50 correctly on %s :) %s\n" \
+				"${GREEN}" "${_clamdConfigFile}" "${RESET}"
+			printf \
+				"%s[+] Go Check https://github.com/4l3xBB/prepare to find out why...%s\n" \
+				"${PURPLE}" "${RESET}"
+			printf \
+				"\n%s[+] Restarting %s to apply changes...%s\n" \
+				"${BLUE}" "${_clamdservice}" "${RESET}"
+
+			systemctl --quiet restart "${_clamdservice}" &> /dev/null && {
+
+				printf \
+					"%s[+] %s restarted correctly %s\n" \
+					"${GREEN}" "${_clamdservice}" "${RESET}"
+			} || {
+				printf >&2 \
+					"%s[!] Could not restart %s correctly :( . Try check Service's Status and Logs using journalctl utility%s\n" \
+					"${RED}" "${_service}" "${RESET}"
+
+				return 1
+			}
+
+		else
 			printf >&2 \
-				"%s[!] Could not restart %s correctly :( . Try check Service's Status and Logs using journalctl utility%s\n" \
-				"${RED}" "${RESET}"
+				"%s[!] Could not Set or Modify Previous Parameter on %s. Try to do it after this script %s\n" \
+				"${RED}" "${_clamdConfigFile}" "${RESET}"
+		fi
+	} || {
+		printf >&2 \
+			"%s[+] MaxDirectoryRecursion Parameter is set correctly ( Value -> 50 )%s\n" \
+			"${GREEN}" "${RESET}"
+	}
 
+	printf \
+		"\n%s[+] Creating ClamAV Configuration Directory as %s...%s\n" \
+		"${BLUE}" "${_clamAVConfigDir}" "${RESET}"
+
+	[[ -n $HOME ]] && mkdir "${_clamAVConfigDir}" &> /dev/null && {
+
+		printf \
+			"%s[+] %s Directory created correctly %s\n" \
+			"${GREEN}" "${_clamAVConfigDir}" "${RESET}"
+	} || {
+		printf >&2 \
+			"%s[!] Could not create %s Directory correctly. Try it manually :( %s\n" \
+			"${RED}" "${_clamAVConfigDir}" "${RESET}"
+		return 1
+	}
+
+	printf \
+		"%s[+] Downloading %s Script from %s...%s\n" \
+		"${BLUE}" "${_clamAVMailer}" "${_githubURL}" "${RESET}"
+
+	_githubReq=$(
+
+		curl --silent \
+		     --write-out '%{http_code}\n' \
+		     --output "${_clamAVConfigDir}/${_clamAVMailer}" \
+		     --request GET \
+		     "${_githubURL}"
+	)
+
+	if (( $_githubReq == 200 )) ; then
+
+		printf \
+			"%s[+] HTTP Status Code -> %s . It seems like %s has been downloaded correctly %s\n" \
+			"${GREEN}" "${_githubReq}" "${_clamAVMailer}"
+
+		printf \
+			"%s[+] Checking %s existence on %s...%s\n" \
+			"${BLUE}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${RESET}"
+
+		[[ -e ${_clamAVConfigDir}/${_clamAVMailer} ]] || {
+
+			printf >&2 \
+				"%s[!] %s does not exist inside %s on %s :( . Try download it manually from above github link %s\n" \
+				"${RED}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${_hostname}" "${RESET}"
 			return 1
+		} || {
+			printf \
+				"%s[+] %s exists inside %s on %s :) %s\n" \
+				"${GREEN}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${_hostname}" "${RESET}"
 		}
-
 	else
 		printf >&2 \
-			"%s[!] Could not Set or Modify Previous Parameter on %s. Try to do it after this script %s\n" \
-			"${RED}" "${_clamdConfigFile}" "${RESET}"
+			"%s[!] HTTP Status Code -> %s .Something went wrong trying to download %s :( %s\n" \
+			"${RED}" "${_githubReq}" "${_clamAVMailer}" "${RESET}"
+		return 1
 	fi
 
-	
+	printf \
+		"%s[+] Checking 
 }
 
 main(){
