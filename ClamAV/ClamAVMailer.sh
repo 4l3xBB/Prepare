@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-sigint_handler(){
+sigintHandler(){
 	printf >&2 \
 		"\n%s[!] SIGINT Signal sent to %s. Exiting...%s\n" \
 		"${RED}" "${0##*/}" "${RESET}"
@@ -13,7 +13,7 @@ sigint_handler(){
 cleanup(){
 	rm -rf ./clamdScan.txt
 	tput cnorm
-	echo -e "\n"
+	printf "\n"
 }
 
 banner(){
@@ -40,14 +40,24 @@ BANNER
 showHelp(){
 	cat << HELP
 	${PINK}
-	DESCRIPTION: --
+	DESCRIPTION: Performs Clamd Scan on Target Directory and Sent Report to Email Account
 
-	USAGE: ${0##*/} [-h|-r] [--help|--recipient] ${RESET}
+	USAGE: ${0##*/} [ -h | -r | -p ] [ --help | --recipient | --path ] ${RESET}
 
-	${PURPLE}OPTIONS:
+	${BLUE}OPTIONS:
 
-		-r | --recipient -> Specifies a Recipient Email Account
+		-r | --recipient -> Recipient Email Account ( REQUIRED )
+
+		-p | --path 	 -> ClamAV Scan Target Directory. If not specified, Default Value is / ( OPTIONAL )
+
 		-h | --help 	 -> Displays this help :) ${RESET}
+
+	${PINK}EXAMPLES:
+
+		${0##*/}    -r john.doe@test.com 	     -p /var
+		${0##*/}    -r=john.doe@test.com 	     -p=/etc/
+		${0##*/}    --recipient john.doe@test.com    --path /var
+		${0##*/}    --recipient=john.doe@test.com    --path=./lib ${RESET}
 HELP
 }
 
@@ -75,7 +85,7 @@ checker(){
 	command -V "${_binary}" &> /dev/null || {
 		
 		printf >&2 \
-			"\n%s[!] %s Binary not found on %s %s\n" \
+			"%s[!] %s Binary not found on %s %s\n" \
 			"${RED}" "${_binary}" "${_hostname}" "${RESET}"
 
 		return 1
@@ -83,6 +93,20 @@ checker(){
 
 	return 0
 }
+
+checkClamAVDeps(){
+	local _package
+	local -A _clamAVSuite=(
+		
+		[clamav-daemon]="clamd"
+		[clamav-freshclam]="freshclam"
+	)
+
+	for _package in "${!_clamAVSuite[@]}" ; do
+
+		checker "${_package}" "${_clamAVSuite[${_package}]}" || return 1
+	done
+} 
 
 checkMailDeps(){
 	local _package
@@ -105,15 +129,20 @@ checkMailDeps(){
 }
 
 sendMail(){
-	local _binary=$1 _recipient=$2 _clamdConfigFile="/etc/clamav/clamd.conf"
+	local _binary=$1 _recipient=$2 _path="${3:-/**}"
 	local _hostname=$( hostname --long )
-	local _maillog="/var/log/maillog" _clamdScanFile="./clamdScan.txt"
+	local _maillog="/var/log/maillog" _clamdScanFile="./clamdScan.txt" _clamdConfigFile="/etc/clamav/clamd.conf"
+
+	[[ $_path != '/**' ]] && _path="${_path}/**"
 
 	printf \
-		"\n%s[+] Performing Clamd Scanning from / on %s...%s\n" \
-		"${BLUE}" "${_hostname}" "${RESET}"
+		"\n%s[+] Performing Clamd Scanning from %s on %s...%s\n" \
+		"${BLUE}" "${_path}" "${_hostname}" "${RESET}"
 
-	{ grep --ignore-case \
+	( 
+	  shopt -sq globstar dotglob
+
+	  grep --ignore-case \
 	       --invert-match \
 	       --perl-regexp \
 	       --text \
@@ -123,12 +152,16 @@ sendMail(){
 	       |(Quarantine of the file).*" < <( clamdscan --multiscan \
 							   --fdpass \
 						           --allmatch \
-						           --infected \
+							   --infected \
 							   --config-file="${_clamdConfigFile}" \
 						           --exclude-dir="^/sys" \
 							   --verbose -- \
-							   /etc \
-							   2>/dev/null ) ; } > "${_clamdScanFile}"
+							   ${_path} \
+							   2>/dev/null 
+
+						) 2> /dev/null
+	) > "${_clamdScanFile}"
+
 	if [[ -s $_clamdScanFile ]] ; then
 		
 		printf \
@@ -136,8 +169,7 @@ sendMail(){
 			"${GREEN}" "${RESET}"
 	else
 		printf >&2 \
-			"\n%s[!] Something went wrong during ClamAV Scan Execution. \
-			Try it manually and Debug Errors" \
+			"\n%s[!] Something went wrong during ClamAV Scan Execution. Try it manually and Debug Errors %s\n" \
 			"${RED}" "${RESET}"
 
 		return 1
@@ -148,11 +180,11 @@ sendMail(){
 	(( $? == 0 )) && { 
 
 		printf \
-			"\n%s[+] %s Process exited with status code %s. Check %s %s" \
+			"\n%s[+] %s Process exited with status code %s. Check %s %s\n" \
 			"${BLUE}" "${_binary}" "${?}" "${_maillog}" "${RESET}"
 	} || {
 		printf >&2 \
-			"\n%s[!] Something went wrong trying to send ClamAV Email to %s :( %s" \
+			"\n%s[!] Something went wrong trying to send ClamAV Email to %s :( %s\n" \
 			"${RED}" "${_recipient}" "${RESET}"
 
 		return 1
@@ -162,12 +194,14 @@ sendMail(){
 main(){
 	local -A _flags=()
 	local -A _optArgs=()
+
 	declare -A _binaryFlags=()
+	local _emailRegex="^[a-zA-Z0-9.!#$%&\\*+/=?^_\`{|}~-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,63}$"
 
 	(( $# == 0 )) && {
 
 		printf >&2 \
-			"\n\t%s[!] Try -h | --help to display Info about this Script :) %s" \
+			"\n\t%s[!] Try -h | --help to display Info about this Script :) %s\n" \
 			"${BLUE}" "${RESET}"
 		exit 99
 	}
@@ -176,10 +210,17 @@ main(){
 
 		[[ $1 == -@(-recipient|r)=* ]] && set -- "${1%=*}" "${1#*=}" "${@:2}" && continue   # -r|--recipient=recipient Format
 
+		[[ $1 == -@(-path|p)=* ]] && set -- "${1%=*}" "${1#*=}" "${@:2}" && continue   # -r|--recipient=recipient Format
+
 		case $1 in
 
 			-r | --recipient )	(( _flags[r]++ ))
-						_optArgs[recipient]="${2?Recipient is null or empty}"
+						_optArgs[recipient]="${2}"
+						shift
+						;;
+
+			-p | --path )		(( _flags[p]++ ))
+						_optArgs[path]="${2%/}"
 						shift
 						;;
 
@@ -190,8 +231,7 @@ main(){
 						;;
 
 			* ) 			printf >&2 \
-							"\n\t%s[!] Unknown Option: %s . \
-							Try -h | --help to Display Help Panel :) %s" \
+							"\n\t%s[!] Unknown Option: %s . Try -h | --help to Display Help Panel :) %s\n" \
 							"${BLUE}" "${1}" "${RESET}"
 						exit 99
 						;;
@@ -199,22 +239,53 @@ main(){
 		shift
 	done
 
-	[[ -z $_flags[r] || -z $_optArgs[recipient] ]] && {
+	[[ -z "${_flags[r]}" || -z "${_optArgs[recipient]}" ]] && {
 
 		printf >&2 \
-			"\n%s[+] Recipient Email Account must be provided. \
-			Try -h | --help to display Help Panel %s" \
+			"\n%s[+] Recipient Email Account must be provided. Try -h | --help to display Help Panel %s\n" \
 			"${RED}" "${RESET}"
 
 		exit 99
 	}
 	
+	[[ "${_optArgs[recipient]}" =~ $_emailRegex ]] || {
+		
+		printf >&2 \
+			"\n%s[!] Recipient specified is not a Valid Email Account. Invalid Format :( %s\n" \
+			"${RED}" "${RESET}"
+
+		exit 99
+	}
+
+	[[ -n "${_optArgs[path]}" ]] && { 
+
+		[[ -d "${_optArgs[path]}" ]] || {
+
+			if [[ -f "${_optArgs[path]}" ]] ; then
+
+				printf >&2 \
+					"\n%s[!] Path specified cannot be a regular file. Must be a Directory %s\n" \
+					"${RED}" "${RESET}"
+			else
+				printf >&2 \
+					"\n%s[!] Invalid System Path. Please provide a valid one :)%s\n" \
+					"${RED}" "${RESET}"
+			fi
+			
+			exit 99
+		}
+	}
+
+	checkClamAVDeps || exit 99
+
 	checkMailDeps
 
 	for _binary in "${!_binaryFlags[@]}" ;  do
 
-		(( _binaryFlags["${_binary}"] == 1 )) && sendMail "${_binary}" "${_optArgs[recipient]}" || exit 99
-		
+		(( _binaryFlags["${_binary}"] == 1 )) && {
+
+			sendMail "${_binary}" "${_optArgs[recipient]}" "${_optArgs[path]}" || exit 99
+		}	
 	done
 }
 
@@ -225,9 +296,10 @@ PURPLE=$( tput setaf 200 )
 PINK=$( tput setaf 219 )
 GREEN=$( tput setaf 83 )
 	
-trap sigint_handler SIGINT
+trap sigintHandler SIGINT
 trap cleanup EXIT
 
 banner
 tput civis
 main "${@}"
+tput cnorm
