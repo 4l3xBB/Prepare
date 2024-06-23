@@ -210,7 +210,7 @@ main(){
 
 		[[ $1 == -@(-recipient|r)=* ]] && set -- "${1%=*}" "${1#*=}" "${@:2}" && continue   # -r|--recipient=recipient Format
 
-		[[ $1 == -@(-path|p)=* ]] && set -- "${1%=*}" "${1#*=}" "${@:2}" && continue   # -r|--recipient=recipient Format
+		[[ $1 == -@(-path|p)=* ]] && set -- "${1%=*}" "${1#*=}" "${@:2}" && continue   # -p|--path=path Format
 
 		case $1 in
 
