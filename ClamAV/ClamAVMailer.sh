@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+
 
 sigintHandler(){
 	printf >&2 \
@@ -78,8 +78,6 @@ checker(){
 		printf >&2 \
 			"\n%s[!] %s package is not installed on %s %s\n" \
 			"${RED}" "${_package}" "${_hostname}" "${RESET}"
-
-		return 1
 	}
 
 	command -V "${_binary}" &> /dev/null || {
@@ -94,8 +92,23 @@ checker(){
 	return 0
 }
 
+systemdChecker(){
+	local _PID1Cmd=$( cat /proc/1/comm ) _hostname=$( hostname --long )
+
+	[[ $_PID1Cmd != systemd ]] && {
+
+		printf >&2 \
+			"\n%s[!] %s has not been initialized by Systemd :( %s\n" \
+			"${RED}" "${_hostname}" "${RESET}"
+
+		return 1
+	}
+	
+	return 0
+}
+
 checkClamAVDeps(){
-	local _package
+	local _package _clamAVService="clamav-daemon.service" _hostname=$( hostname --long )
 	local -A _clamAVSuite=(
 		
 		[clamav-daemon]="clamd"
@@ -106,6 +119,37 @@ checkClamAVDeps(){
 
 		checker "${_package}" "${_clamAVSuite[${_package}]}" || return 1
 	done
+
+	printf \
+		"\n%s[+] Checking if %s is installed on %s...%s\n" \
+		"${BLUE}" "${_clamAVService}" "${_hostname}" "${RESET}"
+
+	grep --quiet \
+	     --ignore-case \
+	     --perl-regexp \
+	     "^${_clamAVService}.*" < <( systemctl list-unit-files \
+						      --type=service \
+						      --all \
+						      --no-legend \
+						      --no-pager
+					  )
+	(( $? != 0 )) && {
+
+		printf >&2 \
+			"\n%s[!] Seems like %s unit has not been created on %s...%s\n" \
+			"${RED}" "${_clamAVService}" "${_hostname}" "${RESET}"
+
+		return 1
+	}
+
+	if ! systemctl --quiet is-active "${_clamAVService}" &> /dev/null ; then
+
+		printf >&2 \
+			"\n%s[!] %s is not Active / Running on %s :( %s\n" \
+			"${RED}" "${_clamAVService}" "${_hostname}" "${RESET}"
+
+		return 1
+	fi
 } 
 
 checkMailDeps(){
@@ -152,7 +196,6 @@ sendMail(){
 	       |(Quarantine of the file).*" < <( clamdscan --multiscan \
 							   --fdpass \
 						           --allmatch \
-							   --infected \
 							   --config-file="${_clamdConfigFile}" \
 						           --exclude-dir="^/sys" \
 							   --verbose -- \
@@ -175,7 +218,7 @@ sendMail(){
 		return 1
 	fi
 
-	"${_binary}" --subject "ClamAV Analysis" "${_recipient}" < "${_clamdScanFile}"
+	"${_binary}" -s "ClamAV Analysis" "${_recipient}" 2> /dev/null < "${_clamdScanFile}" 			# -s -> Mail Subject
 
 	(( $? == 0 )) && { 
 
@@ -276,6 +319,8 @@ main(){
 		}
 	}
 
+	systemdChecker || exit 99
+
 	checkClamAVDeps || exit 99
 
 	checkMailDeps
@@ -284,7 +329,7 @@ main(){
 
 		(( _binaryFlags["${_binary}"] == 1 )) && {
 
-			sendMail "${_binary}" "${_optArgs[recipient]}" "${_optArgs[path]}" || exit 99
+			sendMail "${_binary}" "${_optArgs[recipient]}" "${_optArgs[path]}" && return 0 || exit 99
 		}	
 	done
 }
