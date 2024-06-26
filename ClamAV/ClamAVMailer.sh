@@ -196,6 +196,7 @@ sendMail(){
 	       |(Quarantine of the file).*" < <( clamdscan --multiscan \
 							   --fdpass \
 						           --allmatch \
+							   --infected \
 							   --config-file="${_clamdConfigFile}" \
 						           --exclude-dir="^/sys" \
 							   --verbose -- \
