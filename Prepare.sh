@@ -1613,10 +1613,121 @@ clamAVInstall(){
 		"${GREEN}" "${RESET}"
 }
 
+clamAVMailerSetup(){
+	local _hostname=$( hostname --long ) _clamAVConfigDir="${HOME}/.prepare" _clamAVMailer="ClamAVMailer.sh"
+	local _githubURL="https://raw.githubusercontent.com/4l3xBB/Prepare/main/ClamAV/ClamAVMailer.sh" _githubReq
+	local _mailAccount="info@prepare.com"
+
+	printf \
+		"%s[+] Checking if %s Directory exists on %s...%s\n" \
+		"${BLUE}" "${_clamAVConfigDir}" "${_hostname}" "${RESET}"
+
+	[[ -e $_clamAVConfigDir ]] || {
+	
+		printf >&2 \
+			"%s[!] %s Directory does not exist %s\n" \
+			"${RED}" "${_clamAVConfigDir}" "${RESET}"
+
+		printf \
+			"%s[+] Creating ClamAV Configuration Directory as %s...%s\n" \
+			"${BLUE}" "${_clamAVConfigDir}" "${RESET}"
+
+		[[ -n $HOME ]] && mkdir "${_clamAVConfigDir}" &> /dev/null && {
+
+			printf \
+				"%s[+] %s Directory created correctly %s\n" \
+				"${GREEN}" "${_clamAVConfigDir}" "${RESET}"
+		} || {
+			printf >&2 \
+				"%s[!] Could not create %s Directory correctly. Try it manually :( %s\n" \
+				"${RED}" "${_clamAVConfigDir}" "${RESET}"
+			return 1
+		}
+	}
+
+	printf \
+		"%s[+] %s exists on %s :) %s\n" \
+		"${GREEN}" "${_clamavConfigDir}" "${_hostname}" "${RESET}"
+
+	printf \
+		"%s[+] Downloading %s Script from %s...%s\n" \
+		"${BLUE}" "${_clamAVMailer}" "${_githubURL}" "${RESET}"
+
+	_githubReq=$(
+
+		curl --silent \
+		     --write-out '%{http_code}\n' \
+		     --output "${_clamAVConfigDir}/${_clamAVMailer}" \
+		     --request GET \
+		     "${_githubURL}"
+	)
+
+	if (( $_githubReq == 200 )) ; then
+
+		printf \
+			"%s[+] HTTP Status Code -> %s . It seems like %s has been downloaded correctly %s\n" \
+			"${GREEN}" "${_githubReq}" "${_clamAVMailer}"
+
+		printf \
+			"%s[+] Checking %s existence on %s...%s\n" \
+			"${BLUE}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${RESET}"
+
+		[[ -e ${_clamAVConfigDir}/${_clamAVMailer} ]] || {
+
+			printf >&2 \
+				"%s[!] %s does not exist inside %s on %s :( . Try download it manually from above github link %s\n" \
+				"${RED}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${_hostname}" "${RESET}"
+
+			return 1
+		} || {
+			printf \
+				"%s[+] %s exists inside %s on %s :) %s\n" \
+				"${GREEN}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${_hostname}" "${RESET}"
+
+			return 0
+		}
+	else
+		printf >&2 \
+			"%s[!] HTTP Status Code -> %s .Something went wrong trying to download %s :( %s\n" \
+			"${RED}" "${_githubReq}" "${_clamAVMailer}" "${RESET}"
+		return 1
+	fi
+
+	printf \
+		"%s[+] Let's Try %s on %s to check that everything is OK in terms of Script implementation...%s\n" \
+		"${PURPLE}" "${_clamAVMailer}" "${_hostname}" "${RESET}"
+
+	printf \
+		"%s[+] Analysis Test -> Executing %s to analyze /etc on %s...%s\n" \
+		"${BLUE}" "${_clamAVMailer}" "${_hostname}" "${RESET}"
+
+	bash "${_clamAVMailer}" --recipient="${_mailAccount}" --path=/etc &> /dev/null
+
+	(( $? == 99 )) && {
+
+		printf >&2 \
+			"%s[!] Something went wrong trying to execute %s :(. %s exited with %s Code %s\n" \
+			"${RED}" "${_clamAVMailer}" "${_clamAVMailer}" "${?}" "${RESET}"
+
+		printf \
+			"%[+] Try to execute %s manually and Debug Script Execution to Display / Check errors %s\n" \
+			"${PURPLE}" "${_clamAVMailer}" "${RESET}"
+
+		return 1
+	} || {
+		printf \
+			"%s[+] It seems that %s has been executed correctly...%s\n" \
+			"${GREEN}" "${_clamAVMailer}" "${RESET}"
+		
+		read -p \
+			"${PURPLE} Check ${_mailAccount} and Press Enter if %s's Mail has been received. If not, C-c and Try manually${RESET}\n"
+	}
+}
+
 clamAVSetup(){
-	local _clamdConfigFile="/etc/clamav/clamd.conf" _hostname=$( hostname --long ) _githubReq
+	local _clamdConfigFile="/etc/clamav/clamd.conf" _hostname=$( hostname --long )
 	local _clamdservice="clamav-daemon.service" _clamAVConfigDir="${HOME}/.prepare" _clamAVMailer="ClamAVMailer.sh"
-	local _githubURL="https://raw.githubusercontent.com/4l3xBB/Prepare/main/ClamAV/ClamAVMailer.sh"
+	local _userCrontab=$( crontab -u $( id -un ) -l ) _clamAVMailerCronLine
 
 	clamAVChecker || {
 
@@ -1709,64 +1820,72 @@ clamAVSetup(){
 	}
 
 	printf \
-		"\n%s[+] Creating ClamAV Configuration Directory as %s...%s\n" \
-		"${BLUE}" "${_clamAVConfigDir}" "${RESET}"
+		"\n%s[+] Checking if %s exists on %s...%s\n" \
+		"${BLUE}" "${_clamAVConfigDir}" "${_hostname}" "${RESET}"
 
-	[[ -n $HOME ]] && mkdir "${_clamAVConfigDir}" &> /dev/null && {
-
+	[[ -e $_clamAVConfigDir/${_clamAVMailer} ]] && {
+		
 		printf \
-			"%s[+] %s Directory created correctly %s\n" \
-			"${GREEN}" "${_clamAVConfigDir}" "${RESET}"
+			"%s[+] %s exists on %s %s\n" \
+			"${GREEN}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${RESET}"
 	} || {
 		printf >&2 \
-			"%s[!] Could not create %s Directory correctly. Try it manually :( %s\n" \
-			"${RED}" "${_clamAVConfigDir}" "${RESET}"
-		return 1
+			"%s[!] %s does not exist on %s %s\n" \
+			"${RED}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${RESET}"
+		printf \
+			"%s[+] Let's set up %s on %s...%s\n" \
+			"${PURPLE}" "${_clamAVMailer}" "${_hostname}" "${RESET}"
+
+		clamAVMailerSetup || exit 99
 	}
 
 	printf \
-		"%s[+] Downloading %s Script from %s...%s\n" \
-		"${BLUE}" "${_clamAVMailer}" "${_githubURL}" "${RESET}"
+		"%s[+] Checking if %s's Line exists on %s Crontab...%s\n" \
+		"${BLUE}" "${_clamAVMailer}" "$( id -un )" "${RESET}"
 
-	_githubReq=$(
+	grep --quiet \
+	     --ignore-case \
+	     --perl-regexp \
+	     ".*${_clamAVMailer}.*" <( "${_userCrontab}" )
 
-		curl --silent \
-		     --write-out '%{http_code}\n' \
-		     --output "${_clamAVConfigDir}/${_clamAVMailer}" \
-		     --request GET \
-		     "${_githubURL}"
-	)
-
-	if (( $_githubReq == 200 )) ; then
+	(( $? == 0 )) && { 
 
 		printf \
-			"%s[+] HTTP Status Code -> %s . It seems like %s has been downloaded correctly %s\n" \
-			"${GREEN}" "${_githubReq}" "${_clamAVMailer}"
-
-		printf \
-			"%s[+] Checking %s existence on %s...%s\n" \
-			"${BLUE}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${RESET}"
-
-		[[ -e ${_clamAVConfigDir}/${_clamAVMailer} ]] || {
-
-			printf >&2 \
-				"%s[!] %s does not exist inside %s on %s :( . Try download it manually from above github link %s\n" \
-				"${RED}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${_hostname}" "${RESET}"
-			return 1
-		} || {
-			printf \
-				"%s[+] %s exists inside %s on %s :) %s\n" \
-				"${GREEN}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${_hostname}" "${RESET}"
-		}
-	else
+			"%s[+] Line related to %s is in %s's Crontab :) %s\n" \
+			"${GREEN}" "${_clamAVMailer}" "$( id -un )" "${RESET}"
+	} || {
 		printf >&2 \
-			"%s[!] HTTP Status Code -> %s .Something went wrong trying to download %s :( %s\n" \
-			"${RED}" "${_githubReq}" "${_clamAVMailer}" "${RESET}"
-		return 1
-	fi
+			"%s[!] Line related to %s is not in %s's Crontab :( %s\n" \
+			"${RED}" "${_clamavMailer}" "$( id -un )" "${RESET}"
 
-	printf \
-		"%s[+] Checking "
+		printf \
+			"%s[+] Proceeding to insert that line in %s's Crontab...%s\n" \
+			"${BLUE}" "$( id -un )" "${RESET}"
+
+		_clamAVMailerCronLine="55\t23\t*\t*\t*\tbash ${_clamAVConfigDir}/${_clamAVMailer} --recipient info@prepare.com --path /\n"
+
+		crontab -u $( id -un ) - < <( "${_userCrontab}" ; printf "${_clamAVMailerCronLine}" )
+
+		printf \
+			"%s[+] Checking if %s's Line has been inserted correctly...%s\n" \
+			"${BLUE}" "${_clamAVMailer}" "${RESET}"
+
+		grep --quiet \
+		     --ignore-case \
+		     --perl-regexp \
+		     ".*${_clamAVMailer}.*" <( "${_userCrontab}" ) && { 
+
+		     	printf \
+				"%s[+] Line related to %s exists now :) %s\n" \
+				"${GREEN}" "${_clamAVMailer}" "${RESET}"
+	     	} || {
+			printf >&2 \
+				"%s[!] Could not insert %s's Line on %s's Crontab :( %s\n" \
+				"${RED}" "${_clamAVMailer}" "$( id -un )" "${RESET}"
+
+			return 1
+		}
+	}
 }
 
 main(){
