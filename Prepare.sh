@@ -1593,7 +1593,7 @@ clamAVInstall(){
 	table "ClamAV Install Section"
 
 	printf \
-		"\n%s[+] ClamAV Suite related packages are gonna installed now on %s %s\n" \
+		"\n%s[+] ClamAV Suite related packages are gonna be installed now on %s %s\n" \
 		"${BLUE}" "${_hostname}" "${RESET}"	
 
 	printf \
@@ -1635,7 +1635,7 @@ clamAVMailerSetup(){
 		[[ -n $HOME ]] && mkdir "${_clamAVConfigDir}" &> /dev/null && {
 
 			printf \
-				"%s[+] %s Directory created correctly %s\n" \
+				"%s[+] %s Directory seems to have been created correctly %s\n" \
 				"${GREEN}" "${_clamAVConfigDir}" "${RESET}"
 		} || {
 			printf >&2 \
@@ -1647,7 +1647,7 @@ clamAVMailerSetup(){
 
 	printf \
 		"%s[+] %s exists on %s :) %s\n" \
-		"${GREEN}" "${_clamavConfigDir}" "${_hostname}" "${RESET}"
+		"${GREEN}" "${_clamAVConfigDir}" "${_hostname}" "${RESET}"
 
 	printf \
 		"%s[+] Downloading %s Script from %s...%s\n" \
@@ -1679,12 +1679,10 @@ clamAVMailerSetup(){
 				"${RED}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${_hostname}" "${RESET}"
 
 			return 1
-		} || {
+		} && {
 			printf \
 				"%s[+] %s exists inside %s on %s :) %s\n" \
 				"${GREEN}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${_hostname}" "${RESET}"
-
-			return 0
 		}
 	else
 		printf >&2 \
@@ -1694,16 +1692,16 @@ clamAVMailerSetup(){
 	fi
 
 	printf \
-		"%s[+] Let's Try %s on %s to check that everything is OK in terms of Script implementation...%s\n" \
+		"%s[+] Let's Execute %s on %s to check that everything is OK in terms of Script implementation...%s\n" \
 		"${PURPLE}" "${_clamAVMailer}" "${_hostname}" "${RESET}"
 
 	printf \
 		"%s[+] Analysis Test -> Executing %s to analyze /etc on %s...%s\n" \
 		"${BLUE}" "${_clamAVMailer}" "${_hostname}" "${RESET}"
 
-	bash "${_clamAVMailer}" --recipient="${_mailAccount}" --path=/etc &> /dev/null
+	bash "${_clamAVConfigDir}/${_clamAVMailer}" --recipient="${_mailAccount}" --path=/etc &> /dev/null
 
-	(( $? == 99 )) && {
+	(( $? == 99 || $? != 0 )) && {
 
 		printf >&2 \
 			"%s[!] Something went wrong trying to execute %s :(. %s exited with %s Code %s\n" \
@@ -1720,14 +1718,113 @@ clamAVMailerSetup(){
 			"${GREEN}" "${_clamAVMailer}" "${RESET}"
 		
 		read -p \
-			"${PURPLE} Check ${_mailAccount} and Press Enter if %s's Mail has been received. If not, C-c and Try manually${RESET}\n"
+			"${PURPLE}[*] Check ${_mailAccount} and Press Enter if ${_clamAVMailer}'s Mail has been received. If not, C-c and Try it manually${RESET}"
+
+		return 0
+	}
+}
+
+userCrontabBackup(){
+	local _crontabBackupFile="$( id -un ).crontab.bk" _clamAVConfigDir="${HOME}/.prepare" _userCrontab="crontab -u $( id -un ) -l"
+
+	printf \
+		"%s[+] Backing UP %s's Crontab File as %s on %s...%s\n" \
+		"${PURPLE}" "$( id -un )" "${_crontabBackupFile}" "${_clamAVConfigDir}" "${RESET}"
+	
+	$_userCrontab > "${_clamAVConfigDir}/${_crontabBackupFile}" 2> /dev/null
+
+	[[ -s ${_clamAVConfigDir}/${_crontabBackupFile} ]] && {
+		
+		printf \
+			"%s[+] %s's Crontab Backup done successfully :) %s\n" \
+			"${GREEN}" "$( id -un )" "${RESET}"
+
+		return 0
+	} || {
+		printf >&2 \
+			"%s[!] %s's Crontab Backup failed :( . Try to backup it manually %s\n" \
+			"${RED}" "$( id -un )" "${RESET}"
+
+		return 1
+	}
+}
+
+clamAVMailerCrontab(){
+	local _status=$1 _clamAVConfigDir="${HOME}/.prepare" _clamAVMailer="ClamAVMailer.sh" _mailAccount="info@prepare.com"
+	local _userCrontab="crontab -u $( id -un ) -l" _userCrontabTemplate="./Assets/userCrontabTemplate.txt"
+
+	local _clamAVMailerCronLine="55\t23\t*\t*\t*\tbash ${_clamAVConfigDir}/${_clamAVMailer} --recipient ${_mailAccount} --path /\n"
+
+	(( $_status == 0 )) && {
+
+		printf \
+			"%s[+] Checking if %s's Line exists on %s's Crontab...%s\n" \
+			"${BLUE}" "${_clamAVMailer}" "$( id -un )" "${RESET}"
+
+		grep --quiet \
+		     --ignore-case \
+		     --perl-regexp \
+		     ".*${_clamAVMailer}.*" <( ${_userCrontab} )
+
+		(( $? == 0 )) && { 
+
+			printf \
+				"%s[+] Line related to %s is in %s's Crontab :) %s\n" \
+				"${GREEN}" "${_clamAVMailer}" "$( id -un )" "${RESET}"
+
+			return 0
+		} || {
+			printf >&2 \
+				"%s[!] Line related to %s is not in %s's Crontab :( %s\n" \
+				"${RED}" "${_clamAVMailer}" "$( id -un )" "${RESET}"
+
+			userCrontabBackup || return 1	
+				
+			printf \
+				"%s[+] Proceeding to insert that line in %s's Crontab...%s\n" \
+				"${BLUE}" "$( id -un )" "${RESET}"
+
+			crontab -u $( id -un ) - 2> /dev/null < <( ${_userCrontab} ; printf "${_clamAVMailerCronLine}" )
+		}
+	} || {
+			
+		printf \
+			"%s[+] Proceeding to Create new Crontab File for %s user...%s\n" \
+			"${BLUE}" "$( id -un )" "${RESET}"
+		printf \
+			"%s[+] Inserting %s's Line into created Crontab...%s\n" \
+			"${BLUE}" "${_clamAVMailer}" "${RESET}"
+		
+		crontab -u $( id -un ) - 2> /dev/null < <( cat "${_userCrontabTemplate}" ; printf "${_clamAVMailerCronLine}" )
+	}
+
+	printf \
+		"%s[+] Checking if %s's Line has been inserted correctly...%s\n" \
+		"${BLUE}" "${_clamAVMailer}" "${RESET}"
+
+	grep --quiet \
+	     --ignore-case \
+	     --perl-regexp \
+	     ".*${_clamAVMailer}.*" <( ${_userCrontab} ) && { 
+
+		printf \
+			"%s[+] Line related to %s exists now :) %s\n" \
+			"${GREEN}" "${_clamAVMailer}" "${RESET}"
+
+		return 0
+	} || {
+		printf >&2 \
+			"%s[!] Could not insert %s's Line on %s's Crontab :( %s\n" \
+			"${RED}" "${_clamAVMailer}" "$( id -un )" "${RESET}"
+
+		return 1
 	}
 }
 
 clamAVSetup(){
 	local _clamdConfigFile="/etc/clamav/clamd.conf" _hostname=$( hostname --long )
 	local _clamdservice="clamav-daemon.service" _clamAVConfigDir="${HOME}/.prepare" _clamAVMailer="ClamAVMailer.sh"
-	local _userCrontab=$( crontab -u $( id -un ) -l ) _clamAVMailerCronLine
+	local _userCrontab="crontab -u $( id -un ) -l"
 
 	clamAVChecker || {
 
@@ -1821,7 +1918,16 @@ clamAVSetup(){
 
 	printf \
 		"\n%s[+] Checking if %s exists on %s...%s\n" \
-		"${BLUE}" "${_clamAVConfigDir}" "${_hostname}" "${RESET}"
+		"${BLUE}" "${_clamAVMailer}" "${_clamAVConfigDir}" "${RESET}"
+
+	[[ -z $HOME ]] && {
+
+		printf >&2 \
+			"%[!] %s Global Variable is empty. Check it ( If it's empty, export value to it ) %s\n" \
+			"${RED}" "${HOME}" "${RESET}"
+
+		return 1
+	}
 
 	[[ -e $_clamAVConfigDir/${_clamAVMailer} ]] && {
 		
@@ -1836,56 +1942,28 @@ clamAVSetup(){
 			"%s[+] Let's set up %s on %s...%s\n" \
 			"${PURPLE}" "${_clamAVMailer}" "${_hostname}" "${RESET}"
 
-		clamAVMailerSetup || exit 99
+		clamAVMailerSetup || return 1
 	}
 
 	printf \
-		"%s[+] Checking if %s's Line exists on %s Crontab...%s\n" \
-		"${BLUE}" "${_clamAVMailer}" "$( id -un )" "${RESET}"
+		"\n%s[+] Checking if %s's Crontab exists or not...%s\n" \
+		"${BLUE}" "$( id -un )" "${RESET}"
 
-	grep --quiet \
-	     --ignore-case \
-	     --perl-regexp \
-	     ".*${_clamAVMailer}.*" <( "${_userCrontab}" )
-
-	(( $? == 0 )) && { 
+	if $_userCrontab &> /dev/null ; then
 
 		printf \
-			"%s[+] Line related to %s is in %s's Crontab :) %s\n" \
-			"${GREEN}" "${_clamAVMailer}" "$( id -un )" "${RESET}"
-	} || {
+			"%s[+] %s's Crontab is not empty %s\n"\
+			"${GREEN}" "$( id -un )" "${RESET}"
+
+		clamAVMailerCrontab "0" || return 1
+			
+	else
 		printf >&2 \
-			"%s[!] Line related to %s is not in %s's Crontab :( %s\n" \
-			"${RED}" "${_clamavMailer}" "$( id -un )" "${RESET}"
+			"%s[!] %s's Crontab is empty %s\n" \
+			"${RED}" "$( id -un )" "${RESET}"
 
-		printf \
-			"%s[+] Proceeding to insert that line in %s's Crontab...%s\n" \
-			"${BLUE}" "$( id -un )" "${RESET}"
-
-		_clamAVMailerCronLine="55\t23\t*\t*\t*\tbash ${_clamAVConfigDir}/${_clamAVMailer} --recipient info@prepare.com --path /\n"
-
-		crontab -u $( id -un ) - < <( "${_userCrontab}" ; printf "${_clamAVMailerCronLine}" )
-
-		printf \
-			"%s[+] Checking if %s's Line has been inserted correctly...%s\n" \
-			"${BLUE}" "${_clamAVMailer}" "${RESET}"
-
-		grep --quiet \
-		     --ignore-case \
-		     --perl-regexp \
-		     ".*${_clamAVMailer}.*" <( "${_userCrontab}" ) && { 
-
-		     	printf \
-				"%s[+] Line related to %s exists now :) %s\n" \
-				"${GREEN}" "${_clamAVMailer}" "${RESET}"
-	     	} || {
-			printf >&2 \
-				"%s[!] Could not insert %s's Line on %s's Crontab :( %s\n" \
-				"${RED}" "${_clamAVMailer}" "$( id -un )" "${RESET}"
-
-			return 1
-		}
-	}
+		clamAVMailerCrontab "1" || return 1
+	fi
 }
 
 main(){
