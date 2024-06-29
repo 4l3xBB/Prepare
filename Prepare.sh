@@ -194,10 +194,11 @@ checker1(){
 		printf \
 			"%s[+] %s Binary installed %s\n" \
 			"${GREEN}" "${_binary}" "${RESET}"
-	} || { printf >&2 \
+	} || {
+		printf >&2 \
 			"%s[!] %s Binary not installed on %s %s\n" \
 			"${RED}" "${_binary}" "${_hostname}" "${RESET}"
-	       return 1 ; }
+	}
 
 	printf \
 		"%s[+] Checking if %s is active/running...%s\n" \
@@ -1506,7 +1507,7 @@ clamAVChecker(){
 	)
 
 	printf \
-		"\n%s[+] Checking if ClamAV is installed on %s %s\n" \
+		"\n%s[+] Checking if ClamAV Suite is installed on %s...%s\n" \
 		"${BLUE}" "${_hostname}" "${RESET}"
 
 	for _service in "${!_clamAVSuite[@]}"; do 
@@ -1752,6 +1753,7 @@ userCrontabBackup(){
 clamAVMailerCrontab(){
 	local _status=$1 _clamAVConfigDir="${HOME}/.prepare" _clamAVMailer="ClamAVMailer.sh" _mailAccount="info@prepare.com"
 	local _userCrontab="crontab -u $( id -un ) -l" _userCrontabTemplate="./Assets/userCrontabTemplate.txt"
+	local _clamAVMailerCmdline
 
 	local _clamAVMailerCronLine="55\t23\t*\t*\t*\tbash ${_clamAVConfigDir}/${_clamAVMailer} --recipient ${_mailAccount} --path /\n"
 
@@ -1771,6 +1773,25 @@ clamAVMailerCrontab(){
 			printf \
 				"%s[+] Line related to %s is in %s's Crontab :) %s\n" \
 				"${GREEN}" "${_clamAVMailer}" "$( id -un )" "${RESET}"
+
+			_clamAVMailerCmdline=$(
+
+				awk '/ClamAVMailer/ { \
+				     for ( i=6 ; i<=NF ; i++ ) \
+					     printf \
+					     	   "%s%s" ,\
+						   $i , ( i==NF ? "\n" : " " ) \
+
+				     }' <( ${_userCrontab} )
+			)
+
+			printf \
+				"%s[+] %s's Command on %s's Crontab -> %s\n" \
+				"${BLUE}" "${_clamAVMailer}" "$( id -un )" "${RESET}"
+
+			printf \
+				"%s[*] %s %s\n" \
+				"${PURPLE}" "${_clamAVMailerCmdline}" "${RESET}"
 
 			return 0
 		} || {
@@ -1810,6 +1831,12 @@ clamAVMailerCrontab(){
 		printf \
 			"%s[+] Line related to %s exists now :) %s\n" \
 			"${GREEN}" "${_clamAVMailer}" "${RESET}"
+
+		printf \
+			"%s[+] %s's Crontab's Line -> %s\n" \
+			"${BLUE}" "${_clamAVMailer}" "${RESET}"
+
+		printf "${PURPLE}[*] ${_clamAVMailerCronLine} ${RESET}\n"
 
 		return 0
 	} || {
