@@ -11,7 +11,7 @@ sigintHandler(){
 }
 
 cleanup(){
-	rm -rf ./clamdScan.txt
+	rm -rf ./clamdScan.txt "${_tmpFile}"
 	tput cnorm
 	printf "\n"
 }
@@ -173,19 +173,25 @@ checkMailDeps(){
 }
 
 sendMail(){
-	local _binary=$1 _recipient=$2 _path="${3:-/**}"
-	local _hostname=$( hostname --long )
+	local _binary=$1 _recipient=$2 _path="${3:-/}"
+	local _hostname=$( hostname --long ) _prepareDir="/root/.prepare" 
 	local _maillog="/var/log/maillog" _clamdScanFile="./clamdScan.txt" _clamdConfigFile="/etc/clamav/clamd.conf"
+	_tmpFile=$( mktemp --tmpdir="${_prepareDir}" --suffix=.txt -- sysFiles.XXXXXX 2> /dev/null )
 
-	[[ $_path != '/**' ]] && _path="${_path}/**"
+	printf \
+		"\n%s[+] Extracting all Regular Files inside %s on %s...%s\n" \
+		"${BLUE}" "${_path}" "${_hostname}" "${RESET}"
+
+	find "${_path}" \
+	     -type f \
+	     > "${_tmpFile}"
+	     2> /dev/null \
 
 	printf \
 		"\n%s[+] Performing Clamd Scanning from %s on %s...%s\n" \
 		"${BLUE}" "${_path}" "${_hostname}" "${RESET}"
 
-	( 
-	  shopt -sq globstar dotglob
-
+	{ 
 	  grep --ignore-case \
 	       --invert-match \
 	       --perl-regexp \
@@ -198,19 +204,17 @@ sendMail(){
 						           --allmatch \
 							   --infected \
 							   --config-file="${_clamdConfigFile}" \
-						           --exclude-dir="^/sys" \
-							   --verbose -- \
-							   ${_path} \
-							   2>/dev/null 
-
-						) 2> /dev/null
-	) > "${_clamdScanFile}"
+							   --verbose \
+							   --file-list="${_tmpFile}" -- \
+							   2>/dev/null
+					       )		
+	} > "${_clamdScanFile}"
 
 	if [[ -s $_clamdScanFile ]] ; then
 		
 		printf \
-			"\n%s[+] ClamAV Scan completed correctly :) %s\n" \
-			"${GREEN}" "${RESET}"
+			"\n%s[+] ClamAV Scan completed correctly and sent to %s :) %s\n" \
+			"${GREEN}" "${_recipient}" "${RESET}"
 	else
 		printf >&2 \
 			"\n%s[!] Something went wrong during ClamAV Scan Execution. Try it manually and Debug Errors %s\n" \
