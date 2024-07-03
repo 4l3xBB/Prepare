@@ -527,7 +527,15 @@ pleskEmailSecurity(){
 
 				local error=0
 
-				checker2 "${_service}" "${_serviceBinary[${_service}]}" && continue || { (( error++ )) ; break ; }
+				checker2 "${_service}" "${_serviceBinary[${_service}]}" && continue || { 
+
+					[[ $_service == "spamassassin.service" ]] && {
+
+						checker2 "spamd.service" "spamd" && continue
+					}
+
+					(( error++ )) ; break
+				}
 			done
 
 			(( $error != 0 )) && { printf >&2 \
@@ -571,38 +579,83 @@ pleskEmailSecurity(){
 }
 
 amavisdSpamdChecker(){
-	local _service _hostname=$(hostname --fqdn) _logFile=$(mktemp --suffix=log)
-	local _perlLibrary="libdbd-mysql-perl"
-	local -a _services=(
+	local _service _index _hostname=$(hostname --fqdn) _logFile=$(mktemp --suffix=log)
+	local _perlLibrary="libdbd-mysql-perl" _spamdService="spamd.service"
+	local -A _services=(
 		
-		"spamassassin.service"
-		"amavis.service"
+		[spamassassin.service]=""
+		[amavis.service]=""
 	)	
 
 	printf \
 		"\n%s[!] Warning: It may be necessary to install Amavis Perl Library ( %s ) %s\n" \
 		"${PURPLE}" "${_perlLibrary}" "${RESET}"
 	
-	# spamassassin.service
+	# spamassassin.service | spamd.service
 
-	for _service in "${_services[@]}"; do
+	for _service in "${!_services[@]}"; do
 
 	printf \
 		"%s[+] Checking if %s is Active / Running...%s\n" \
 		"${BLUE}" "${_service}" "${RESET}"
 
-		if systemctl --quiet is-active "${_service}"; then
+		if systemctl --quiet is-active "${_service}" 2> /dev/null; then
 
 			printf \
 				"%s[+] %s is Active / Running on %s %s\n" \
 				"${GREEN}" "${_service}" "${_hostname}" "${RESET}"
-
 		else
 			printf >&2 \
 				"%s[!] %s is not Active / Running on %s %s\n" \
 				"${RED}" "${_service}" "${_hostname}" "${RESET}"
 
-			[[ $_service == *amavis.service* ]] && {
+			[[ $_service == "spamassassin.service" ]] && {
+
+				printf \
+					"%s[+] Checking if %s exists on %s instead of %s...%s\n" \
+					"${BLUE}" "${_spamdService}" "${_hostname}" "${_service}" "${RESET}"
+
+				grep --quiet \
+				     --ignore-case \
+				     --perl-regexp \
+				     ".*${_spamdService}.*" <( systemctl list-unit-files \
+				     				         --all \
+				     				         --type=service \
+								         --no-pager \
+								         --no-legend 
+							     )
+				(( $? == 0 )) && {
+
+					unset _services["${_service}"] && _services["${_spamdService}"]=""
+					_service="${_spamdService}" unset _spamdService
+
+					printf \
+						"%s[+] %s is installed on %s %s\n" \
+						"${GREEN}" "${_service}" "${_hostname}" "${RESET}"
+
+					printf \
+						"%s[+] Checking if %s is Active / Running on %s...%s\n" \
+						"${BLUE}" "${_service}" "${_hostname}" "${RESET}"
+					
+					systemctl --quiet is-active "${_service}" 2> /dev/null && {
+
+						printf \
+							"%s[+] %s is Active / Running on %s %s\n" \
+							"${GREEN}" "${_service}" "${_hostname}" "${RESET}"
+					} || {
+						printf >&2 \
+							"%s[!] %s in not Active / Running on %s %s\n" \
+							"${RED}" "${_service}" "${_hostname}" "${RESET}"
+					}
+				} || {
+					printf >&2 \
+						"%s[!] %s is not installed on %s %s\n" \
+						"${RED}" "${_spamdService}" "${_hostname}" "${RESET}"
+				}
+
+			}
+
+			[[ $_service == "amavis.service" ]] && {
 
 				printf \
 					"%s[!] %s seems down due to lack of package dependencies ( %s ) %s\n" \
@@ -717,13 +770,13 @@ amavisdSpamdChecker(){
 			return 1
 		fi
 
-	for _service in "${_services[@]}"; do
+	for _service in "${!_services[@]}"; do
 
 		printf \
 			"%s[+] Checking if %s is Enabled... %s\n" \
 			"${BLUE}" "${_service}" "${RESET}"
 		
-		if systemctl --quiet is-enabled "${_service}"; then
+		if systemctl --quiet is-enabled "${_service}" 2> /dev/null ; then
 
 			printf \
 				"%s[+] %s is Enabled on %s %s\n" \
@@ -733,14 +786,20 @@ amavisdSpamdChecker(){
 			printf >&2 \
 				"%s[!] %s is not Enabled on %s %s\n" \
 				"${RED}" "${_service}" "${_hostname}" "${RESET}"
+
 			printf \
 				"%s[+] Trying to enable %s... %s\n" \
 				"${BLUE}" "${_service}" "${RESET}"
 
-			systemctl --quiet enable "${_service}" || { printf >&2 \
-										"%s[!] Could not enable %s :( . Try journalctl -rxu %s %s\n" \
-										"${RED}" "${_service}" "${_service}" "${RESET}"
-								      return 1 ; } 
+			systemctl --quiet enable "${_service}" 2> /dev/null || { 
+
+				printf >&2 \
+					"%s[!] Could not enable %s :( . Try journalctl -rxu %s %s\n" \
+					"${RED}" "${_service}" "${_service}" "${RESET}"
+
+				return 1
+		        } 
+
 			printf \
 				"%s[+] %s enabled :) %s\n" \
 				"${GREEN}" "${_service}" "${RESET}"
