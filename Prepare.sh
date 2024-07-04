@@ -185,19 +185,22 @@ pleskChecker(){
 checker1(){
 	local _service=$1 _binary=$2 _hostname=$(hostname --fqdn)
 
-	printf \
-		"\n%s[+] Checking if %s Binary is installed...%s\n" \
-		"${BLUE}" "${_binary}" "${RESET}" \
-
-	command -V "${_binary}" &> /dev/null && { \
+	[[ -n $_binary ]] && {
 
 		printf \
-			"%s[+] %s Binary installed %s\n" \
-			"${GREEN}" "${_binary}" "${RESET}"
-	} || {
-		printf >&2 \
-			"%s[!] %s Binary not installed on %s %s\n" \
-			"${RED}" "${_binary}" "${_hostname}" "${RESET}"
+			"\n%s[+] Checking if %s Binary is installed...%s\n" \
+			"${BLUE}" "${_binary}" "${RESET}" \
+
+		command -V "${_binary}" &> /dev/null && {
+
+			printf \
+				"%s[+] %s Binary installed %s\n" \
+				"${GREEN}" "${_binary}" "${RESET}"
+		} || {
+			printf >&2 \
+				"%s[!] %s Binary not installed on %s %s\n" \
+				"${RED}" "${_binary}" "${_hostname}" "${RESET}"
+		}
 	}
 
 	printf \
@@ -205,9 +208,9 @@ checker1(){
 		"${BLUE}" "${_service}" "${RESET}"
 
 	command -V systemctl &>/dev/null && \
-	systemctl &> /dev/null \
-		--quiet \
-		is-active "${_service}" && { \
+	systemctl --quiet \
+		  is-active \
+		  2> /dev/null "${_service}" && {
 	
 		printf \
 			"%s[+] %s is Active/Running %s\n" \
@@ -225,43 +228,43 @@ checker1(){
 checker2(){
 	local _service=$1 _binary=$2
 
-	printf \
-		"%s[+] Checking if %s Binary related to %s is installed...%s\n" \
-		"${BLUE}" "${_binary}" "${_service}" "${RESET}"
-	
-	if command -V "${_binary}" &> /dev/null; then
-
 		printf \
-			"%s[+] %s Binary installed %s\n" \
-			"${GREEN}" "${_binary}" "${RESET}"
-		printf \
-			"%s[+] Checking if %s is active/running...%s\n" \
-			"${BLUE}" "${_service}" "${RESET}"
+			"%s[+] Checking if %s Binary related to %s is installed...%s\n" \
+			"${BLUE}" "${_binary}" "${_service}" "${RESET}"
+		
+		if command -V "${_binary}" &> /dev/null; then
 
-		grep --ignore-case \
-		     --perl-regexp \
-		     --quiet \
-		     "${_service}" < <( systemctl list-unit-files \
-						  --type=service \
-						  --no-pager
-				      ) && { printf \
-							"%s[+] %s is Active/Running %s\n" \
-							"${GREEN}" "${_service}" "${RESET}"
-					     return 0
-					     
-				      } || { printf >&2 \
-							"%s[!] %s is not active or running on %s %s\n" \
-							"${RED}" "${_service}" "${_hostname}" "${RESET}"
+			printf \
+				"%s[+] %s Binary installed %s\n" \
+				"${GREEN}" "${_binary}" "${RESET}"
+			printf \
+				"%s[+] Checking if %s is active/running...%s\n" \
+				"${BLUE}" "${_service}" "${RESET}"
 
-					     return 1 ; }						# If Binary = 0 and Service != 0
-	else
-		printf >&2 \
-			"%s[!] %s Binary not installed on %s %s \n" \
-			"${RED}" "${_binary}" "${_hostname}" "${RESET}"
+			grep --ignore-case \
+			     --perl-regexp \
+			     --quiet \
+			     "${_service}" < <( systemctl list-unit-files \
+							  --type=service \
+							  --no-pager
+					      ) && { printf \
+								"%s[+] %s is Active/Running %s\n" \
+								"${GREEN}" "${_service}" "${RESET}"
+						     return 0
+						     
+					      } || { printf >&2 \
+								"%s[!] %s is not active or running on %s %s\n" \
+								"${RED}" "${_service}" "${_hostname}" "${RESET}"
 
-		return 1	 									# If Binary != 0 directly
+						     return 1 ; }						# If Binary = 0 and Service != 0
+		else
+			printf >&2 \
+				"%s[!] %s Binary not installed on %s %s \n" \
+				"${RED}" "${_binary}" "${_hostname}" "${RESET}"
 
-	fi
+			return 1	 									# If Binary != 0 directly
+
+		fi
 }
 
 checkService(){
@@ -492,7 +495,7 @@ pleskEmailSecurity(){
 		local _service
 		local -A _serviceBinary=(
 			
-			[amavis.service]="amavisd-new"
+			[amavis.service]="amavisd"
 			[spamassassin.service]="spamd"
 		)
 
@@ -534,11 +537,16 @@ pleskEmailSecurity(){
 						checker2 "spamd.service" "spamd" && continue
 					}
 
+					[[ $_service == "amavis.service" ]] && {
+
+						checker2 "${_service}" "amavisd-new" && continue
+					}
+
 					(( error++ )) ; break
 				}
 			done
 
-			(( $error != 0 )) && { printf >&2 \
+			(( $error == 1 )) && { printf >&2 \
 							"%s[!] Try again previous steps about Plesk Email Security on Plesk UI %s\n" \
 							"${RED}" "${RESET}"
 					       continue; }
@@ -547,13 +555,14 @@ pleskEmailSecurity(){
 			
 			printf \
 				"%s[!] Perl Binary is necessary as interpreter to execute Previous Binary's services...%s\n" \
-				"${BLUE}" "${RESET}"
+				"${PURPLE}" "${RESET}"
 
 			printf \
 				"%s[+] Checking is Perl Binary is installed on %s... %s\n" \
 				"${BLUE}" "${_hostname}" "${RESET}"
 
 			if command -V perl &> /dev/null; then
+
 				printf \
 					"%s[+] Perl Binary installed on %s :) %s\n" \
 					"${GREEN}" "${_hostname}" "${RESET}"
@@ -627,7 +636,7 @@ amavisdSpamdChecker(){
 				(( $? == 0 )) && {
 
 					unset _services["${_service}"] && _services["${_spamdService}"]=""
-					_service="${_spamdService}" unset _spamdService
+					_service="${_spamdService}"
 
 					printf \
 						"%s[+] %s is installed on %s %s\n" \
@@ -939,6 +948,20 @@ createSwap(){
 			printf \
 				"\nvm.swappiness=10\n" \
 				>> /etc/sysctl.conf
+			
+			(( $? == 0 )) && {
+
+				sysctl --load &> /dev/null && {
+
+					printf \
+						"%s[+] Swappiness Parameter configured correctly %s\n" \
+						"${GREEN}" "${RESET}"
+				} || {
+					printf >&2 \
+						"%s[!] Could not configure Swappiness Parameter correctly :( . Try it manually%s\n" \
+						"${RED}" "${RESET}"
+				}
+			}
 		else
 			printf \
 				"%s[+] Swappiness Parameter found on %s file %s\n" \
@@ -1070,6 +1093,7 @@ COMMENT
 		[MemTotal]="${_memTotal}"
 		[SwapTotal]="${_swapValue}"
 		[Buffers]="${_buffers}"
+		[Swappiness]=
 	)
 
 	awk -v \
@@ -1081,6 +1105,8 @@ COMMENT
 	printf \
 		"\n%s[+] Generating Table Report with Updated Values related to System Memory...%s\n" \
 		"${BLUE}" "${RESET}"
+
+	_swappiness=$( cat /proc/sys/vm/swappiness )
 
 	memInfoTable \
 		"${_memoryValues[MemTotal]}" 	\
@@ -1429,7 +1455,7 @@ mySQLRamDisk(){
 		"%s[+] Mounting %s as TMPFS on %s...%s\n" \
 		"${BLUE}" "${_ramdisk}" "${_hostname}" "${RESET}"
 
-	mount --all && {
+	mount --all 2> /dev/null && {
 
 		printf \
 			"%s[+] Seems like %s has been mounted...%s\n" \
@@ -1445,6 +1471,23 @@ mySQLRamDisk(){
 			printf \
 				"%s[+] %s has been mounted successfully as TMPFS on %s :) %s\n" \
 				"${GREEN}" "${_ramdisk}" "${_hostname}" "${RESET}"
+
+			printf \
+				"%s[+] Reloading Systemd to apply %s's configuration...%s\n" \
+				"${BLUE}" "${_fstab}" "${RESET}"
+
+			systemctl --quiet daemon-reload 2> /dev/null && {
+				
+				printf \
+					"%s[+] Systemd reload correctly :) %s\n" \
+					"${GREEN}" "${RESET}"
+			} || {
+				printf >&2 \
+					"%s[!] Could not reload Systemd correctly :( %s\n" \
+					"${RED}" "${RESET}"
+
+				return 1
+			}
 		else
 			printf >&2 \
 				"%s[*] Warning: Seems like %s is mounted but not as TMPFS %s\n" \
@@ -2052,6 +2095,116 @@ clamAVSetup(){
 	fi
 }
 
+sshdPortSetup(){
+	local _hostname=$( hostname --long ) _sshdConfig="/etc/ssh/sshd_config" _sshdService="sshd.service"
+	local _previousSSHdPort _sshdPort=12021
+
+	printf \
+		"%s[+] Checking which Port %s is listening on...%s\n" \
+		"${BLUE}" "${_sshdService}" "${RESET}"
+
+	[[ -e $_sshdConfig ]] && {
+
+		_previousSSHdPort=$( 
+				    grep --ignore-case \
+					 --perl-regexp \
+					 --only-matching \
+					 '^Port\s\K\d{1,5}$' \
+					 "${_sshdConfig}"
+				  )
+	} || {
+		printf >&2 \
+			"%s[!] Could not find %s on %s :( %s\n" \
+			"${RED}" "${_sshdConfig##*/}" "${_sshdConfig%/*}" "${RESET}"
+		
+		return 1
+	}
+	
+	if (( $? == 0 )) && [[ -n $_previousSSHdPort ]] ; then
+
+		(( $_previousSSHdPort == 22 )) && {	
+
+			printf \
+				"%s[+] WARNING -> %s is listening on Default Port %s\n" \
+				"${RED}" "${_sshdService}" "${RESET}"
+		}
+		
+		printf \
+			"%s[+] %s's Listen Port -> %s %s \n" \
+			"${PURPLE}" "${_sshdService}" "${_previousSSHdPort}" "${RESET}"
+	else
+		printf >&2 \
+			"%s[!] Could not Extract %s's Listen Port value from %s :( %s \n" \
+			"${RED}" "${_sshdService}" "${_sshdConfig}" "${RESET}"
+
+		return 1
+	fi
+	
+	(( $_previousSSHdPort != $_sshdPort )) && {
+
+		printf \
+			"%s[+] Setting %s Port as Listening Port for %s on %s...%s\n" \
+			"${BLUE}" "${_sshdPort}" "${_sshdService}" "${_hostname}" "${RESET}"
+
+		sed --regexp-extended \
+		    --in-place \
+		    "s@^(Port)\s[0-9]{1,5}@\1 ${_sshdPort}@g" \
+		    "${_sshdConfig}"
+
+		(( $? == 0 )) && {
+
+			printf \
+				"%s[+] It seems like %s Port's Value has been modified to %s %s\n" \
+				"${BLUE}" "${_sshdService}" "${_sshdPort}" "${RESET}"
+
+			printf \
+				"%s[+] Checking previous modification on %s...%s\n" \
+				"${BLUE}" "${_sshdConfig}" "${RESET}"
+			
+			grep --quiet \
+			     --ignore-case \
+			     --perl-regexp \
+			     '^Port\s12021$' \
+			     "${_sshdConfig}"
+
+			(( $? == 0 )) && {
+				
+				printf \
+					"%s[+] %s Port's Value modified correctly to %s :) %s\n" \
+					"${GREEN}" "${_sshdService}" "${_sshdPort}" "${RESET}"
+			} || {
+				printf >&2 \
+					"%s[!] It seems like something went wrong trying to change %s Port's Value :( . Try it Manually %s\n" \
+					"${RED}" "${_sshdConfig}" "${RESET}"
+
+				return 1
+			}
+		}
+	} || {
+		printf \
+			"%s[+] It's not necessary to change %s's Listen Port as It's already %s :) %s\n" \
+			"${BLUE}" "${_sshdService}" "${_sshdPort}" "${RESET}"
+	}
+}
+
+sshdSetup(){
+	local _hostname=$( hostname --long )
+
+	printf \
+		"\n%s[+] sshd's Binary and Service Status already checked previously on %s %s\n" \
+		"${BLUE}" "${_hostname}" "${RESET}"
+	
+	sshdPortSetup || return 1
+
+	# sshdRootLoginSetup || return 1
+	
+	# At Function's END, Restart SSHD service and Check if all changes done have been applied correctly
+		
+		# SSH 12021 Port -> lsof Command -> lsof -i:12021 -s TCP:listen -Pn -a -c sshd &> /dev/null
+
+		# Permit Root Login -> Non Interactive Way ( Maybe )
+}
+
 main(){
 	local -A flags=()
 	local -A optArgs=()
@@ -2151,25 +2304,29 @@ ADVISE
 
 	checkService 		|| exit 1
 
-	#table " Plesk Email Security"
+# 	table " Plesk Email Security"
+# 
+# 	pleskEmailSecurity "${_pleskSecretKey}" || exit 1
+# 
+# 	table " Amavis - SpamAssassin"
+# 
+# 	amavisdSpamdChecker || exit 1
+# 
+# 	table "     Memory - Swap"
+# 
+# 	makeSwap $( getMemoryInfo ) || exit 1	# $( Function ) : FD 1 -> Temporal Buffer -> Variable ; FD 2 -> Screen
+# 
+# 	table "MySQL Ramdisk - Checking"
+# 
+# 	mySQLRamDisk || exit 1
+# 
+# 	table "ClamAV Suite Section"
+# 
+# 	clamAVSetup || exit 1
 
-	#pleskEmailSecurity "${_pleskSecretKey}" || exit 1
+	table "SSH Service Setup Section"
 
-	#table " Amavis - SpamAssassin"
-
-	#amavisdSpamdChecker || exit 1
-
-	#table "     Memory - Swap"
-
-	#makeSwap $( getMemoryInfo ) || exit 1	# $( Function ) : FD 1 -> Temporal Buffer -> Variable ; FD 2 -> Screen
-
-	#table "MySQL Ramdisk - Checking"
-
-	#mySQLRamDisk || exit 1
-
-	table "ClamAV Suite Section"
-
-	clamAVSetup || exit 1
+	sshdSetup || exit 1
 }
 
 RESET=$(tput sgr0)
