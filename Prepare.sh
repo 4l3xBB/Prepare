@@ -2095,23 +2095,217 @@ clamAVSetup(){
 	fi
 }
 
-sshdPortSetup(){
-	local _hostname=$( hostname --long ) _sshdConfig="/etc/ssh/sshd_config" _sshdService="sshd.service"
-	local _previousSSHdPort _sshdPort=12021
+extractProcessPorts(){
+	local _service=$1 _servicePID _processPort _numRegex='^[0-9]+$' _port
+	local -A _extractedPorts=()
+
+	_servicePID=$(
+
+		systemctl show \
+			  --property=MainPID \
+			  --value "${_service}"
+	)
+
+	[[ $_servicePID =~ $_numRegex ]] && (( $_servicePID != 0 )) && {
+
+		_processPort=$(		
+		
+			awk ' NR > 1 \
+			      { split ( $( NF - 1 ), a, ":" ) ; \
+			      print a[2] } ' < <( 
+						   lsof -p${_servicePID} \
+							-a \
+							-i 4TCP \
+							-s TCP:listen \
+							-Pn \
+							2> /dev/null
+						)
+			2> /dev/null
+		)
+
+		if [[ -n $_processPort ]] ; then
+			
+			while read -r _port ; do
+
+				_extractedPorts["${_port}"]=""	
+
+			done <<< "${_processPort}"
+		else
+			return 1
+		fi
+
+	} || return 1
+
+	printf "%s\n" "${!_extractedPorts[@]}"
+}
+
+deleteSSHport(){
+	local _sshdDeletedPort=$1 _sshdService="sshd.service" _sshdConfig="/etc/ssh/sshd_config"
 
 	printf \
-		"%s[+] Checking which Port %s is listening on...%s\n" \
-		"${BLUE}" "${_sshdService}" "${RESET}"
+		"%s[+] Deleting %s Port's Parameter related to %s Port on %s...%s\n" \
+		"${BLUE}" "${_sshdService}" "${_sshdDeletedPort}" "${_sshdConfig}" "${RESET}"
+
+	sed --regexp-extended \
+	    --in-place \
+	    "/^#?\s*Port\s${_sshdDeletedPort}$/d" \
+	    "${_sshdConfig}" \
+	    2> /dev/null
+
+	(( $? == 0 )) && {
+
+		printf \
+			"%s[+] It seems like %s Port's Line has been deleted...%s\n" \
+			"${BLUE}" "${_sshdDeletedPort}" "${RESET}"
+
+		printf \
+			"%s[+] Checking it...%s\n" \
+			"${BLUE}" "${RESET}"
+
+		grep --quiet \
+		     --ignore-case \
+		     --perl-regexp \
+		     "^#?\s*Port\s${_sshdDeletedPort}$" \
+		     "${_sshdConfig}"
+
+		if (( $? == 0 )) ; then
+			
+			printf \
+				"%s[+] %s Port's Line deleted correctly :) %s\n" \
+				"${GREEN}" "${_sshdDeletedPort}" "${RESET}"
+
+			return 0
+		else
+			printf >&2 \
+				"%s[!] Could not delete %s Port's Line :( %s\n" \
+				"${RED}" "${_sshdDeletedPort}" "${RESET}"
+
+			return 1
+		fi
+
+	} || {
+		printf >&2 \
+			"%s[!] Could not delete %s Port's Line on %s :( %s\n" \
+			"${RED}" "${_sshdDeletedPort}" "${_sshdConfig}" "${RESET}"
+
+		return 1
+	}
+}
+
+setSSHport(){
+	local _sshdPortNew=$1 _hostname=$( hostname --long ) _sshdService="sshd.service"
+	local _sshdConfig="/etc/ssh/sshd_config"
+
+	printf \
+		"%s[+] Setting %s Port as Listening Port for %s on %s...%s\n" \
+		"${BLUE}" "${_sshdPortNew}" "${_sshdService}" "${_hostname}" "${RESET}"
+
+	sed --regexp-extended \
+	    --in-place \
+	    "s@^\#?(Port)\s[0-9]{1,5}@\1 ${_sshdPortNew}@g" \
+	    "${_sshdConfig}" \
+	    2> /dev/null
+
+	(( $? == 0 )) && {
+
+		printf \
+			"%s[+] It seems like %s Port's Value has been modified to %s %s\n" \
+			"${BLUE}" "${_sshdService}" "${_sshdPortNew}" "${RESET}"
+
+		printf \
+			"%s[+] Checking previous modification on %s...%s\n" \
+			"${BLUE}" "${_sshdConfig}" "${RESET}"
+		
+		grep --quiet \
+		     --ignore-case \
+		     --perl-regexp \
+		     '^Port\s12021$' \
+		     "${_sshdConfig}"
+
+		(( $? == 0 )) && {
+			
+			printf \
+				"%s[+] %s Port's Value modified correctly to %s :) %s\n" \
+				"${GREEN}" "${_sshdService}" "${_sshdPortNew}" "${RESET}"
+
+			return 0
+		} || {
+			printf >&2 \
+				"%s[!] It seems like something went wrong trying to change %s Port's Value :( . Try it Manually %s\n" \
+				"${RED}" "${_sshdConfig}" "${RESET}"
+
+			return 1
+		}
+	} || {
+		printf >&2 \
+			"%s[!] Could not set up %s Port as Listening Port on %s :( %s\n" \
+			"${RED}" "${_sshdPortNew}" "${_hostname}" "${RESET}"
+
+		return 1
+	}
+}
+
+checkSSHPort(){
+	local _sshdPort=$1 _sshdConfig="/etc/ssh/sshd_config"
+	
+	printf \
+		"%s[+] Checking if %s Port's Line exists on %s...%s\n" \
+		"${BLUE}" "${_sshdPort}" "${_sshdConfig}" "${RESET}"
+	
+	grep --quiet \
+	     --ignore-case \
+	     --perl-regexp \
+	     "^Port\s${_sshdPort}$" \
+	     "${_sshdConfig}"
+
+	(( $? == 0 )) && {
+
+		printf \
+			"%s[+] %s Port's Line exists on %s %s\n" \
+			"${GREEN}" "${_sshdPort}" "${_sshdConfig}" "${RESET}"
+
+		return 0
+
+	} || {
+		printf >&2 \
+			"%s[!] %s Port's Line does not exist on %s %s\n" \
+			"${RED}" "${_sshdPort}" "${_sshdConfig}" "${RESET}"
+
+		return 1
+	}	
+}
+
+sshdPortSetup(){
+	local _hostname=$( hostname --long ) _sshdConfig="/etc/ssh/sshd_config" _sshdService="sshd.service"
+	local _sshdPortNew=12021 _defaultPort=22 _port _currentPort _deleteLineStatus=0
+	local -A _currentSSHdPorts=()
+
+	printf \
+		"\n%s[+] Checking if %s Config file exists on %s...%s\n" \
+		"${BLUE}" "${_sshdConfig##*/}" "${_sshdConfig%/*}" "${RESET}"
 
 	[[ -e $_sshdConfig ]] && {
 
-		_previousSSHdPort=$( 
-				    grep --ignore-case \
-					 --perl-regexp \
-					 --only-matching \
-					 '^Port\s\K\d{1,5}$' \
-					 "${_sshdConfig}"
-				  )
+		printf \
+			"%s[+] Checking which Port[s] %s is listening on %s...%s\n" \
+			"${BLUE}" "${_sshdService}" "${RESET}"
+		
+		while read -r _port ; do
+
+			_currentSSHdPorts["${_port}"]=""
+
+		done < <( 
+
+			extractProcessPorts "${_sshdService}" || {
+
+				printf >&2 \
+					"%s[!] Something went wrong trying to extract which Port is %s listening on :( %s\n" \
+					"${RED}" "${_sshdService}" "${RESET}"
+
+				return 1
+			}
+		)
+
 	} || {
 		printf >&2 \
 			"%s[!] Could not find %s on %s :( %s\n" \
@@ -2119,90 +2313,249 @@ sshdPortSetup(){
 		
 		return 1
 	}
-	
-	if (( $? == 0 )) && [[ -n $_previousSSHdPort ]] ; then
 
-		(( $_previousSSHdPort == 22 )) && {	
+	printf \
+		"%s[+] %s's Listening Port[s] on %s -> %s %s\n" \
+		"${BLUE}" "${_sshdService}" "${_hostname}" \
+		$( printf "%s " "${!_currentSSHdPorts[@]}" ) "${RESET}"
 
-			printf \
-				"%s[+] WARNING -> %s is listening on Default Port %s\n" \
-				"${RED}" "${_sshdService}" "${RESET}"
-		}
-		
-		printf \
-			"%s[+] %s's Listen Port -> %s %s \n" \
-			"${PURPLE}" "${_sshdService}" "${_previousSSHdPort}" "${RESET}"
-	else
+	# Not Necessary, Above Logic ensures that there is no such problem ( Just in Case )
+
+	(( "${#_currentSSHdPorts[@]}" == 0 )) && {
+
 		printf >&2 \
-			"%s[!] Could not Extract %s's Listen Port value from %s :( %s \n" \
-			"${RED}" "${_sshdService}" "${_sshdConfig}" "${RESET}"
+			"s%[+] It seems that no Listen Port related to %s could be extracted %s\n" \
+			"${RED}" "${_sshdService}" "${RESET}"
 
 		return 1
-	fi
-	
-	(( $_previousSSHdPort != $_sshdPort )) && {
+	}
 
-		printf \
-			"%s[+] Setting %s Port as Listening Port for %s on %s...%s\n" \
-			"${BLUE}" "${_sshdPort}" "${_sshdService}" "${_hostname}" "${RESET}"
+	# Several Elements ( Listen Ports > 1 ) on array
 
-		sed --regexp-extended \
-		    --in-place \
-		    "s@^(Port)\s[0-9]{1,5}@\1 ${_sshdPort}@g" \
-		    "${_sshdConfig}"
+	if (( "${#_currentSSHdPorts[@]}" > 1 )) ; then
 
-		(( $? == 0 )) && {
-
-			printf \
-				"%s[+] It seems like %s Port's Value has been modified to %s %s\n" \
-				"${BLUE}" "${_sshdService}" "${_sshdPort}" "${RESET}"
-
-			printf \
-				"%s[+] Checking previous modification on %s...%s\n" \
-				"${BLUE}" "${_sshdConfig}" "${RESET}"
-			
-			grep --quiet \
-			     --ignore-case \
-			     --perl-regexp \
-			     '^Port\s12021$' \
-			     "${_sshdConfig}"
-
-			(( $? == 0 )) && {
+		for _currentPort in "${!_currentSSHdPorts[@]}" ; do
+		
+			(( $_currentPort != $_sshdPortNew )) && {
 				
-				printf \
-					"%s[+] %s Port's Value modified correctly to %s :) %s\n" \
-					"${GREEN}" "${_sshdService}" "${_sshdPort}" "${RESET}"
+				deleteSSHPort "${_currentPort}" && (( _deleteLineStatus++ )) || return 1
+
 			} || {
+				checkSSHPort "${_currentPort}" || { 
+					
+					printf >&2 \
+						"%s[+] Check Include Directives on %s %s\n" \
+						"${PURPLE}" "${_sshdConfig}" "${RESET}"
+
+					return 1
+				}
+			}
+		done
+
+	(( $_deleteLineStatus != 0 )) && return 10	
+
+	# One Element ( Listen Ports == 1 ) on array
+
+	else
+		_currentPort="${_currentSSHdPorts[@]}"
+
+		(( $_currentPort == $_sshdPortNew )) {
+			
+			printf \
+				"%s[+] Checking if %s Port's Line exists on %s...%s\n" \
+				"${BLUE}" "${_currentPort}" "${_sshdConfig}" "${RESET}"
+
+			checkSSHPort "${_currentPort}" && {
+
+				printf \
+					"%s[+] It's not necessary to change %s Port's Parameter as Currently Port is %s :) %s\n" \
+					"${PURPLE}" "${_sshdService}" "${_currentPort}" "${RESET}"
+
+				return 0 
+			} || { 
+					
 				printf >&2 \
-					"%s[!] It seems like something went wrong trying to change %s Port's Value :( . Try it Manually %s\n" \
-					"${RED}" "${_sshdConfig}" "${RESET}"
+					"%s[+] Check Include Directives on %s %s\n" \
+					"${PURPLE}" "${_sshdConfig}" "${RESET}"
 
 				return 1
 			}
 		}
-	} || {
+
+		(( $_currentPort == $_defaultPort )) {
+			
+			checkSSHport "${_currentPort}"
+
+			if (( $? == 0 )) ; then
+				
+				deleteSSHport "${_currentPort}" && { setSSHPort "${_sshdPortNew}" && return 10 ; } || return 1
+			else
+				setSSHPort "${_sshdPortNew}" && return 10 || return 1
+			fi
+		}
+
+		(( $_currentPort != $_sshdPortNew && $_currentPort != $_defaultPort )) && {
+
+			setSSHPort "${_sshdPortNew}" && return 10 || return 1
+		}
+
+	fi
+
+}
+
+sshdRootLoginSetup(){
+	local _hostname=$( hostname --long ) _sshdService="sshd.service" _sshdRootDirective="PermitRootLogin"
+	local _sshdConfig="/etc/ssh/sshd_config" _defaultValueRootLogin
+	local _checkRootDirective=(
+
+		grep --ignore-case \
+		     --perl-regexp \
+		     "^${_sshdRootDirective}\syes$" \
+		     "${_sshdConfig}"
+	)
+
+	printf \
+		"\n%s[+] Checking if %s Parameter is Enabled on %s...%s\n" \
+		"${BLUE}" "${_sshdRootDirective}" "${_hostname}" "${RESET}"
+
+	"${_checkRootDirective[@]}" &> /dev/null
+
+	(( $? == 0 )) && {
+
 		printf \
-			"%s[+] It's not necessary to change %s's Listen Port as It's already %s :) %s\n" \
-			"${BLUE}" "${_sshdService}" "${_sshdPort}" "${RESET}"
+			"%s[+] %s Parameter's Value -> Yes. Therefore means that Root login on %s is enabled %s\n" \
+			"${PURPLE}" "${_sshdRootDirective}" "${_hostname}" "${RESET}"
+
+		return 0
+	}
+
+	_defaultValueRootLogin=$(
+
+		grep --ignore-case \
+		     --perl-regexp \
+		     "^\#?${_sshdRootDirective}\s.*$" \
+		     "${_sshdConfig}"
+	)
+
+	printf \
+		"%s[+] %s Parameter is disabled ( Default Value -> %s ) %s\n" \
+		"${RED}" "${_sshdRootDirective}" "${_defaultValueRootLogin}" "${RESET}"
+
+	printf \
+		"%s[!] Warning: %s's Root Login will be enabled %s\n" \
+		"${PURPLE}" "${_sshdService}" "${RESET}"
+
+	printf \
+		"\n%s[+] Enabling Root login through %s on %s %s...\n" \
+		"${BLUE}" "${_sshdService}" "${_hostname}" "${RESET}"
+
+	sed --regexp-extended \
+	    --in-place \
+	    "s@^\#?(${_sshdRootDirective}).*\$@\1 yes@g" \
+	    "${_sshdConfig}" \
+	    2> /dev/null
+
+	if (( $? == 0 )) ; then
+
+		printf \
+			"%s[+] It seems like %s Parameter has been modified correctly on %s. Let's Check it...%s\n" \
+			"${BLUE}" "${_sshdRootDirective}" "${_sshdConfig}" "${RESET}"
+	else
+
+		printf >&2 \
+			"%s[!] Something went wrong trying to modify %s Parameter's Value. Try it manually %s\n" \
+			"${RED}" "${_sshdRootDirective}" "${RESET}"
+
+		return 1
+	fi
+
+	printf \
+		"%s[+] Checking if %s Parameter's Value has been set to \"Yes\"...%s\n" \
+		"${BLUE}" "${_sshdRootDirective}" "${RESET}"
+
+	"${_checkRootDirective[@]}" &> /dev/null && {
+
+		printf \
+			"%s[+] %s Parameter modified successfully on %s :) %s\n" \
+			"${GREEN}" "${_sshdRootDirective}" "${_sshdConfig}" "${RESET}"
+
+		return 10
+	} || {
+		printf >&2 \
+			"%s[!] It seems like %s Parameter has not been modified on %s :( . Try it manually %s\n" \
+			"${RED}" "${_sshdRootDirective}" "${_sshdConfig}" "${RESET}"
+
+		return 1
 	}
 }
 
 sshdSetup(){
-	local _hostname=$( hostname --long )
+	local _hostname=$( hostname --long ) _sshdService="sshd.service" _sshdPortStatus _sshdRootLoginStatus
+	local _sshdPort=12021 _sshdConfig="/etc/ssh/sshd_config"
 
 	printf \
 		"\n%s[+] sshd's Binary and Service Status already checked previously on %s %s\n" \
 		"${BLUE}" "${_hostname}" "${RESET}"
-	
-	sshdPortSetup || return 1
-
-	# sshdRootLoginSetup || return 1
-	
-	# At Function's END, Restart SSHD service and Check if all changes done have been applied correctly
 		
-		# SSH 12021 Port -> lsof Command -> lsof -i:12021 -s TCP:listen -Pn -a -c sshd &> /dev/null
+	sshdPortSetup
 
-		# Permit Root Login -> Non Interactive Way ( Maybe )
+	_sshdPortStatus=$?
+		
+	sshdRootLoginSetup
+
+	_sshdRootLoginStatus=$?
+
+	(( $_sshdPortStatus == 1 || $_sshdRootLoginStatus == 1 )) && return 1
+
+	(( $_sshdPortStatus == 10 || $_sshdRootLoginStatus == 10 )) && {
+
+		printf \
+			"\n%s[+] Restarting %s on %s to apply previous changes...%s\n" \
+			"${BLUE}" "${_sshdService}" "${_hostname}" "${RESET}"
+
+		systemctl --quiet restart "${_sshdService}" 2> /dev/null
+
+		if (( $? == 0 )) ; then
+
+			printf \
+				"%s[+] %s restarted correctly :) %s\n" \
+				"${GREEN}" "${_sshdService}" "${RESET}"
+		else
+			printf >&2 \
+				"%s[!] Something went wrong trying to restart %s %s :(\n" \
+				"${RED}" "${_sshdService}" "${RESET}"
+
+			return 1
+		fi
+	}
+
+	printf \
+		"\n%s[+] Checking whether %s Port is being used by Process related to %s...%s\n" \
+		"${BLUE}" "${_sshdPort}" "${_sshdService}" "${RESET}"
+
+	lsof -i:12021 \
+	     -s TCP:listen \
+	     -Pn \
+	     -a \
+	     -c sshd \
+	     &> /dev/null
+
+	(( $? == 0 )) && {
+
+		printf \
+			"%s[+] %s Port is being used by %s on %s :) %s\n" \
+			"${GREEN}" "${_sshdPort}" "${_sshdService}" "${_hostname}" "${RESET}"
+	} || {
+		printf >&2 \
+			"%s[!] %s Port is not being used by %s on %s :( %s \n" \
+			"${RED}" "${_sshdPort}" "${_sshdService}" "${_hostname}" "${RESET}"
+
+		return 1
+	}
+
+	printf \
+		"%s[*] PermitRootLogin Parameter's Value is set to \"Yes\" on %s. Try log in as Root manually %s\n" \
+		"${PURPLE}" "${_sshdConfig}" "${RESET}"
 }
 
 main(){
