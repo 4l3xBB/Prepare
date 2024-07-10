@@ -2193,10 +2193,10 @@ deleteSSHPort(){
 }
 
 checkSSHPort(){
-	local _sshdPort="${1:-\\d{1,5}}" _sshdConfig=$2
+	local _sshdPort="${1:-\\d{1,5\}}" _sshdConfig=$2
 	
 	printf \
-		"%s[+] Checking if %s Port's Line exists on %s...%s\n" \
+		"\n%s[+] Checking if %s Port's Line exists on %s...%s\n" \
 		"${BLUE}" "${_sshdPort}" "${_sshdConfig}" "${RESET}"
 	
 	grep --quiet \
@@ -2227,7 +2227,7 @@ setSSHPort(){
 	local _sshdConfig="/etc/ssh/sshd_config"
 
 	printf \
-		"%s[+] Setting %s Port as Listening Port for %s on %s...%s\n" \
+		"\n%s[+] Setting %s Port as Listening Port for %s on %s...%s\n" \
 		"${BLUE}" "${_sshdPortNew}" "${_sshdService}" "${_hostname}" "${RESET}"
 
 	sed --regexp-extended \
@@ -2323,7 +2323,7 @@ deleteAdditionalSSHPort(){
 	local -A _sshdPortFiles=()
 
 	printf \
-		"%s[+] Searching for other SSH Configuration Files which have Port's Directive on %s...%s\n" \
+		"\n%s[+] Searching for other SSH Configuration Files which have Port's Directive on %s...%s\n" \
 		"${BLUE}" "${_hostname}" "${RESET}"
 
 	while IFS=":" read -r _file _line; do
@@ -2349,7 +2349,7 @@ deleteAdditionalSSHPort(){
 			"${PURPLE}" "${_sshdService}" "${#_sshdPortFiles[@]}" "${RESET}"
 
 		printf \
-			"%s[+] Proceeding to delete %s Port's Line on those files...%s\n" \
+			"\n%s[+] Proceeding to delete %s Port's Line on those files...%s\n" \
 			"${BLUE}" "${_sshdService}" "${RESET}"
 		
 		for _line in "${!_sshdPortFiles[@]}" ; do
@@ -2363,10 +2363,10 @@ deleteAdditionalSSHPort(){
 			(( $? == 0 )) && {
 
 				printf \
-					"%s[+] It seems like Port's Directive ( %s ) on %s has been deleted...%s\n" \
+					"\n%s[+] It seems like Port's Directive ( %s ) on %s has been deleted...%s\n" \
 					"${BLUE}" "${_line}" "${_sshdPortFiles[${_line}]}" "${RESET}"
 
-				if checkSSHPort "" "${_sshdPortFiles[${_line}]}" ; then
+				if checkSSHPort "${_line:5}" "${_sshdPortFiles[${_line}]}" ; then
 				
 					printf \
 						"%s[+] Could not delete %s Port's Line :( %s\n" \
@@ -2385,17 +2385,37 @@ deleteAdditionalSSHPort(){
 				printf >&2 \
 					"%s[!] An Error occurred trying to delete Port's Directive ( %s ) on %s :( %s\n" \
 					"${RED}" "${_line}" "${_sshdPortFiles[${_line}]}" "${RESET}"
+
 				return 1
 			}
 		done
 
 		printf \
-			"%s[+] All %s Port' Lines deleted correctly on SSH Configuration Files != %s %s\n" \
+			"\n%s[+] All %s Port' Lines deleted correctly on SSH Configuration Files != %s %s\n" \
 			"${GREEN}" "${_sshdService}" "${_sshdConfig}" "${RESET}"
+
+		printf \
+			"\n%s[+] Restarting %s on %s to apply previous changes...%s\n" \
+			"${BLUE}" "${_sshdService}" "${_hostname}" "${RESET}"
+
+		systemctl --quiet restart "${_sshdService}" 2> /dev/null
+
+		if (( $? == 0 )) ; then
+
+			printf \
+				"%s[+] %s restarted correctly :) %s\n" \
+				"${GREEN}" "${_sshdService}" "${RESET}"
+		else
+			printf >&2 \
+				"%s[!] Something went wrong trying to restart %s %s :(\n" \
+				"${RED}" "${_sshdService}" "${RESET}"
+
+			return 1
+		fi
 
 		# Return Ports to Delete from Listening Ports Array
 
-		for _port in "${!_sshdPortFiles[@]}" ; do printf >&3 "%s\n" "${_port:5}" ; done
+		for _port in "${!_sshdPortFiles[@]}" ; do [[ $_port != "Port 12021" ]] && printf >&3 "%s\n" "${_port:5}" ; done
 
 		return 0
 	}
@@ -2491,15 +2511,6 @@ sshdPortSetup(){
 
 	# Not Necessary, Above Logic ensures that there is no such problem ( Just in Case )
 
-	(( "${#_currentSSHdPorts[@]}" == 0 )) && {
-
-		printf >&2 \
-			"s%[+] It seems that no Listen Port related to %s could be extracted %s\n" \
-			"${RED}" "${_sshdService}" "${RESET}"
-
-		return 1
-	}
-
 	# Several Elements ( Listen Ports > 1 ) on array
 
 	if (( "${#_currentSSHdPorts[@]}" > 1 )) ; then
@@ -2522,6 +2533,11 @@ sshdPortSetup(){
 	else
 		_currentPort=${!_currentSSHdPorts[@]}
 
+		[[ -z $_currentPort ]] && {
+
+			setSSHPort "${_sshdPortNew}" "${_sshdConfig}" && return 10 || return 1
+		}
+
 		(( $_currentPort == $_sshdPortNew )) && {
 
 			checkSSHPort "${_currentPort}" "${_sshdConfig}" && {
@@ -2537,7 +2553,7 @@ sshdPortSetup(){
 					"%s[+] Check Include Directives on %s. Maybe Port's Directive is in another Config File%s\n" \
 					"${PURPLE}" "${_sshdConfig}" "${RESET}"
 
-				return 1
+				setSSHPort "${_sshdPortNew}" "${_sshdConfig}" && return 10 || return 1
 			}
 		}
 
