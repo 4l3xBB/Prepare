@@ -1006,27 +1006,8 @@ createSwap(){
 	return 0
 }
 
-makeSwap(){
-	local _memTotal=$1 _swapTotal=$2 _buffers=$3
-	local _diskUsage _swapFile="/swapfile" _hostname=$( hostname --fqdn )
-	local _swappiness=$( cat /proc/sys/vm/swappiness )
-
-	printf \
-		"%s[+] Checking Swap File / Partition on %s...%s\n" \
-		"${BLUE}" "${_hostname}" "${RESET}"
-
-	awk -v \
-	    swapTotal="${_swapTotal}" \
-	    'BEGIN { exit ( swapTotal == 0 ? 0 : 1 ) }'
-
-	(( $? != 0 )) && { printf \
-				"%s[+] Swap File / Partition already exists on %s %s \n" \
-				"${PURPLE}" "${_hostname}" "${RESET}"
-			
-			    return 0 ; }
-	printf >&2 \
-		"%s[!] Swap File or Partition doest not exists on %s %s\n" \
-		"${RED}" "${_hostname}" "${RESET}"
+getDiskUsage(){
+	local _hostname=$( hostname --long )
 
 	printf \
 		"%s[+] Checking Disk Usage on %s... %s\n" \
@@ -1043,17 +1024,110 @@ makeSwap(){
 		printf \
 			"%s[+] Disk Usage on %s -> %s %% %s\n" \
 			"${BLUE}" "${_hostname}" "${_diskUsage}" "${RESET}"
+		
+		printf >&3 "${_diskUsage}"
+
 	else
 		printf >&2 \
 			"%s[!] An Error occurred while trying to obtain System's Disk Space %s \n" \
 			"${RED}" "${RESET}"
+
 		return 1
 	fi
+}
 
-	(( $_diskUsage > 80 )) && { printf >&2 \
-					"%s[!] Low Available Disk Space on %s to create Swap File :( . Do some cleanup First %s \n" \
-					"${RED}" "${_hostname}" "${RESET}"
-				    return 1 ; }
+makeSwap(){
+	local _memTotal=$1 _swapTotal=$2 _buffers=$3
+	local _diskUsage _swapFile="/swapfile" _hostname=$( hostname --fqdn )
+	local _swappiness=$( cat /proc/sys/vm/swappiness )
+
+	printf \
+		"%s[+] Checking Swap Existence on %s...%s\n" \
+		"${BLUE}" "${_hostname}" "${RESET}"
+
+	awk -v \
+	    swapTotal="${_swapTotal}" \
+	    'BEGIN { exit ( swapTotal == 0 ? 0 : 1 ) }'
+
+	(( $? != 0 )) && { 
+
+		printf \
+			"%s[+] Swap File or Swap Partition already exists on %s ( Value -> %s ) %s \n" \
+			"${PURPLE}" "${_hostname}" "${_swapTotal}" "${RESET}"
+			
+		# ------- #
+
+		printf \
+			"%s[+] Checking if Allocated Swap's Size is established correcty...%s\n" \
+			"${BLUE}" "${RESET}"
+
+		awk -v \
+		    memTotal="${_memTotal}" \
+		    '{ exit ( memTotal <= 2 ? 0 : 1 ) }' && {
+
+			_swapExpectedValue=$( awk ' { printf "%.2f\n" , $1 * 2 } ' <<< "${_memTotal}" )
+
+			_diff=$( awk ' { printf "%.2f\n" , $1 - $2 } ' <<< "${_swapExpectedValue} ${_swapTotal}" )
+
+			(( $_diff > 1 )) && {
+				
+				printf \
+					"%s[!] It's Necessary to add more Swap to the existing one ( Necessary -> %sG ) %s\n" \
+					"${PURPLE}" "${_diff}" "${RESET}"
+			}
+
+			(( $_diff > -1 && $_diff < 1 )) && {
+
+				printf \
+					"%s[+] Allocated Swap's Size is aproximately correct :) ( Diff -> %sG ) %s\n" \
+					"${GREEN}" "${_diff}" "${RESET}"
+
+				return 0
+			}
+
+			(( $_diff < -1 )) && {
+
+				printf >&2 \
+					"%s[!] Warning: Allocated Memory is above its optimal value ( %sG ) %s \n" \
+					"${PURPLE}" "${_swapExpectedValue}" "${RESET}"
+
+				printf \
+					"%s[+] Disabling all System's Swap ( %sG )...%s\n" \
+					"${BLUE}" "${_swapTotal}" "${RESET}"
+
+				swapoff --all &> /dev/null && {
+
+					printf \
+						"%s[+] Swap on %s disabled correctly %s\n" \
+						"${GREEN}" "${_hostname}" "${RESET}"
+				} || {
+					printf >&2 \
+						"%s[+] Something went wrong trying to disable Swap on %s :( %s\n" \
+						"${RED}" "${_hostname}" "${RESET}"
+
+					return 1
+				}
+
+			}
+	    	}
+
+
+	} || {
+		printf >&2 \
+			"%s[!] Swap File or Partition doest not exists on %s %s\n" \
+			"${RED}" "${_hostname}" "${RESET}"
+	}
+
+	$_diskUsage=$( getDiskUsage 3>&1 1>&2 )
+
+	(( $_diskUsage > 80 )) && { 
+
+		printf >&2 \
+			"%s[!] Low Available Disk Space on %s to create Swap File :( . Do some cleanup First %s \n" \
+			"${RED}" "${_hostname}" "${RESET}"
+
+		return 1
+	}
 
 : << COMMENT Recommended Swap Size : 
 
@@ -1062,24 +1136,35 @@ makeSwap(){
 	 > 8GB RAM -> SWAP = 8GB
 COMMENT
 
-	[[ -e $_swapFile ]] && { printf >&2 \
-					"%s[!] %s already exists on %s . Rename or Delete %s to continue %s \n" \
-					"${PURPLE}" "${_swapFile}" "${_hostname}" "${_swapFile}" "${RESET}"
-				 return 1 ; }
+	[[ -e $_swapFile ]] && {
+
+		printf >&2 \
+			"%s[!] %s already exists on %s . Rename or Delete %s to continue %s \n" \
+			"${PURPLE}" "${_swapFile}" "${_hostname}" "${_swapFile}" "${RESET}"
+
+		return 1
+	 }
 
 	awk -v \
 	    memTotal="${_memTotal}" \
 	    'BEGIN { exit ( memTotal <= 2 ? 0 : 1 ) }' && {
 
-		    createSwap "$( awk -v memTotal=${_memTotal} 'BEGIN { printf "%.2f", memTotal * 2 }' )" "${_swapFile}" || return 1 ; }
+		createSwap "$( awk -v memTotal=${_memTotal} 'BEGIN { printf "%.2f", memTotal * 2 }' )" "${_swapFile}" || return 1
+	}
 
 	awk -v \
 	    memTotal="${_memTotal}" \
-	    'BEGIN { exit ( memTotal > 2 && memTotal <= 8 ? 0 : 1 ) }' && { createSwap "${_memTotal}" "${_swapFile}" || return 1 ; } 
+	    'BEGIN { exit ( memTotal > 2 && memTotal <= 8 ? 0 : 1 ) }' && {
+
+	    	createSwap "${_memTotal}" "${_swapFile}" || return 1
+    	} 
 
 	awk -v \
 	    memTotal="${_memTotal}" \
-	    'BEGIN { exit ( memTotal > 8 ? 0 : 1 ) }' && { createSwap "8" "${_swapFile}" || return 1 ; }
+	    'BEGIN { exit ( memTotal > 8 ? 0 : 1 ) }' && {
+
+	    	createSwap "8" "${_swapFile}" || return 1
+    	}
 
 	printf \
 		"%s[+] Checking if %s has been created correctly on %s...%s\n" \
@@ -2194,6 +2279,7 @@ deleteSSHPort(){
 
 checkSSHPort(){
 	local _sshdPort="${1:-\\d{1,5\}}" _sshdConfig=$2
+	local _displayPort="${1:-'( \d{1,5} ) Pattern'}"
 	
 	printf \
 		"\n%s[+] Checking if %s Port's Line exists on %s...%s\n" \
@@ -2524,7 +2610,7 @@ sshdPortSetup(){
 			}
 		done
 
-		checkSSHPort "${_currentPort}" "${_sshdConfig}" || return 1
+		checkSSHPort "${_sshdPortNew}" "${_sshdConfig}" || setSSHPort "${_sshdPortNew}" "${_sshdConfig}" || return 1
 
 		(( $_deleteLineStatus != 0 )) && return 10	
 
