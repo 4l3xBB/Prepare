@@ -67,7 +67,20 @@ ${BLUE}
 ║           Configuration File        	  ║	
 ╠═════════════════════════════════════════╣
   ${1} 
-╚═════════════════════════════════════════╝
+╚═════════════════════════════════════════╝ ${RESET}
+TABLE
+}
+
+deletedSwapFiles(){
+	cat << TABLE
+${BLUE}
+╔═════════════════════════════════════════╗
+║           Deleted Swap Files        	  ║	
+╠═════════════════════════════════════════╣
+  ${1} 
+╚═════════════════════════════════════════╝ ${RESET}
+║
+╚═════════════════════════════════════════╝ ${RESET}
 TABLE
 }
 
@@ -851,12 +864,166 @@ getMemoryInfo(){
 
 }
 
-createSwap(){
-	local _swapSize=$1 _swapFile=$2 _hostname=$(hostname --fqdn) _sysctlFile="/etc/sysctl.conf"
-	local _swappinessFile="/proc/sys/vm/swappiness"
+setFSTabSwapFile(){
+	local _swapFile=$1 _fstabFile="/etc/fstab" _swapString=( "\n${_swapFile} swap swap defaults 0 0\n" )
 
 	printf \
-		"%s[+] Creating Swap File...%s \n" \
+		"\n%s[+] Adding Swap File's Line ( %s ) to %s...%s\n" \
+		"${BLUE}" "${_swapFile}" "${_fstabFile}" "${RESET}"
+
+	{ [[ -e $_fstabFile ]] && printf \
+					"${_swapString[@]}" \
+					>> "${_fstabFile}" ; }
+	printf \
+		"%s[+] Checking if Swap File's Line has been added correctly...%s\n" \
+		"${BLUE}" "${RESET}"
+
+	grep --quiet \
+   	     --ignore-case \
+	     --perl-regexp \
+	     "^${_swapString[@]//\\n/}$" \
+	     "${_fstabFile}"
+
+	(( $? == 0 )) && {
+
+		printf \
+			"%s[+] Line related to Swap File %s -> ( %s ) added on %s :) %s\n" \
+			"${GREEN}" "${_swapFile}" "${_swapString[@]//\\n/}" "${_fstabFile}" "${RESET}"
+
+		return 0
+
+	} || { 
+		printf >&2 \
+			"%s[!] Swap's Line could not be added to %s . Check %s File %s\n" \
+			"${RED}" "${_fstabFile}" "${_fstabFile}" "${RESET}"
+
+		printf \
+		       "%s[!] Note: Remember that System is making use of a Temporary and Volatile Swap %s\n" \
+		       "${PURPLE}" "${RESET}"
+
+		return 1
+	}
+}
+
+deleteFSTabSwapPartitionLines(){
+	local _fstabFile="/etc/fstab"
+
+	grep --quiet \
+	     --ignore-case \
+	     --perl-regexp \
+	     '^(UUID\=[\w-]+|/dev/[^\s]+)\s+(none|swap|(/[^\s]+)+)\s+swap.*$' \
+	     "${_fstabFile}"
+
+	(( $? != 0 )) && {
+
+		printf >&2 \
+			"\n%s[!] Swap Partition's Line[s] not found on %s %s\n" \
+			"${PURPLE}" "${_fstabFile}" "${RESET}"
+
+		return 0
+	}
+
+	printf \
+		"\n%s[+] Deleting Swap Partition Lines on %s...%s\n" \
+		"${BLUE}" "${_fstabFile}" "${RESET}"
+
+	sed --regexp-extended \
+	    --in-place \
+	    '/^(UUID\=[a-zA-Z0-9-]+|\/dev\/[a-zA-Z0-9\-_]+)\s+(none|swap|(\/[a-zA-Z0-9\-_]+)+)\s+swap.*$/d' \
+	    "${_fstabFile}"
+	    2> /dev/null
+
+	(( $? == 0 )) && {
+
+		grep --quiet \
+		     --ignore-case \
+		     --perl-regexp \
+		     '^(UUID\=[\w-]+|/dev/[^\s]+)\s+(none|swap|(/[^\s]+)+)\s+swap.*$' \
+		     "${_fstabFile}"
+
+		if (( $? != 0 )) ; then
+
+			printf \
+				"%s[+] Swap Partition Lines deleted correctly on %s :) %s\n" \
+				"${GREEN}" "${_fstabFile}" "${RESET}"
+
+			return 0
+		else
+			printf >&2 \
+				"%s[+] Could not delete previous lines mentioned :( %s\n" \
+				"${RED}" "${RESET}"
+
+			return 0
+		fi
+
+	} || {
+
+		printf >&2 \
+			"%s[!] Something went wrong trying to delete previous lines mentioned :( %s\n" \
+			"${RED}" "${RESET}"
+
+		return 1
+	}
+}
+
+deleteFSTabSwapFileLines(){
+	local _fstabFile="/etc/fstab"
+
+	printf \
+		"\n%s[+] Proceeding to delete Swap File's Line[s] on %s...%s\n" \
+		"${BLUE}" "${_fstabFile}" "${RESET}"
+
+	sed --regexp-extended \
+	    --in-place \
+	    '/^\/dev(\/[a-zA-Z0-9\-_]+)+/! { /^(\/[a-zA-Z0-9]+)\s+(swap|none)\s+swap.*$/ d }' \
+	    "${_fstabFile}"
+	    2> /dev/null
+
+	if (( $? == 0 )) ; then
+
+		printf \
+			"%s[+] It seems like previous line[s] mentioned have been deleted...%s\n" \
+			"${BLUE}" "${RESET}"
+
+		printf \
+			"%s[+] Checking Existence of that Line[s] on %s...%s\n" \
+			"${BLUE}" "${_fstabFile}" "${RESET}"
+		
+		grep --quiet \
+		     --ignore-case \
+		     --perl-regexp \
+		     '^(?!/dev)(/[^\s]+)\s+(none|swap)\s+swap.*$' \
+		     "${_fstabFile}"
+
+		(( $? != 0 )) && {
+
+			printf \
+				"%s[+] Swap File's Line[s] deleted correctly :) on %s %s\n" \
+				"${GREEN}" "${_fstabFile}" "${RESET}"
+
+			return 0
+
+		} || {
+			printf >&2 \
+				"%s[+] Could not delete Swap File's Line[s] on %s :( %s\n " \
+				"${RED}" "${_fstabFile}" "${RESET}"
+		}
+
+	else
+		printf >&2 \
+			"%s[!] Something went wrong trying to delete previous lines mentioned :( %s\n" \
+			"${RED}" "${RESET}"
+		
+		return 1
+	fi
+}
+
+createSwap(){
+	local _swapSize=$1 _swapFile=$2 _mode=$3 _hostname=$(hostname --fqdn) _sysctlFile="/etc/sysctl.conf" _swappiness
+	local _swappinessFile="/proc/sys/vm/swappiness" _fstabFile="/etc/fstab"
+
+	printf \
+		"\n%s[+] Creating Swap File...%s \n" \
 		"${BLUE}" "${RESET}"
 
 	fallocate -l "${_swapSize}G" "${_swapFile}" &> /dev/null && { 
@@ -868,11 +1035,14 @@ createSwap(){
 		chmod 600 "${_swapFile}" || return 1 && printf \
 								"%s[+] 600 Perms assigned correctly to %s %s\n" \
 								"${GREEN}" "${_swapFile}" "${RESET}"
-		} || { printf >&2 \
-			"%s[!] Error trying to create %s ( TraceBack -> Error on fallocate command ) %s \n" \
-			"${RED}" "${_swapFile}" "${RESET}"
+		} || {
+			printf >&2 \
+				"%s[!] Error trying to create %s ( TraceBack -> Error on fallocate command ) %s \n" \
+				"${RED}" "${_swapFile}" "${RESET}"
 
-		       return 1 ; }
+			return 1 
+	       }
+
 	printf \
 		"%s[+] Preparing %s to be used as Swap...%s \n" \
 		"${BLUE}" "${_swapFile}" "${RESET}"
@@ -898,35 +1068,89 @@ createSwap(){
 		printf \
 			"%s[+] Swap File seems enabled :) %s\n" \
 			"${GREEN}" "${RESET}"
-	} || { printf >&2 \
+	} || { 
+		printf >&2 \
 			"%s[!] Could not enable Swap File :( %s\n" \
 			"${RED}" "${RESET}"
-	       return 1 ; }
-
-	printf \
-		"%s[+] Adding Swap's Line to /etc/fstab %s\n" \
-		"${BLUE}" "${RESET}"
-
-	{ [[ -e /etc/fstab ]] && printf \
-					"\n/swapfile swap swap defaults 0 0\n" \
-					>> /etc/fstab ; }
-	(( $? == 0 )) && {
-
-		printf \
-			"%s[+] Line related to Swap added to /etc/fstab -> ( /swapfile swap swap defaults 0 0 ) %s\n" \
-			"${GREEN}" "${RESET}"
-
-	} || { printf >&2 \
-			"%s[!] Swap's Line could not be added to /etc/fstab. Check /etc/fstab File %s\n" \
-			"${RED}" "${RESET}"
-
-	       printf \
-		       "%s[!] Note: Remember that System is making use of a Temporary and Volatile Swap %s\n" \
-		       "${PURPLE}" "${RESET}"
+	       return 1
 	}
 
 	printf \
-		"%s[+] Reducing System's Swappiness Value...%s \n" \
+		"\n%s[+] Checking if Swap's Line[s] related to Swap File or Partition exists on %s file...%s\n" \
+		"${BLUE}" "${_fstabFile}" "${RESET}"
+
+	grep --quiet \
+	     --ignore-case \
+	     --perl-regexp \
+	     '^(.+\s){2}swap\s.*$' \
+	     "${_fstabFile}"
+
+	if (( $? == 0 )) ; then
+
+		printf \
+			"%s[+] Swap's Line[s] related to Swap File or Partition exist[s] %s\n" \
+			"${PURPLE}" "${RESET}"
+
+		printf \
+			"%s[+] Checking if that/those line[s] correspond[s] to a Swap File...%s\n" \
+			"${BLUE}" "${RESET}"
+
+		grep --quiet \
+		     --ignore-case \
+		     --perl-regexp \
+		     '^(?!/dev)(/[^\s]+)\s+(none|swap)\s+swap.*$' \
+		     "${_fstabFile}"
+
+		(( $? == 0 )) && {
+
+			printf \
+				"%s[+] Swap File's Line[s] found on %s %s\n" \
+				"${PURPLE}" "${_fstabFile}" "${RESET}"
+
+			[[ -n $_mode ]] && {
+
+				(( $_mode == 3 )) && {
+
+					printf \
+						"\n%s[+] First of all, Let's delete Swap Partitions' Line[s] if they exist %s\n" \
+						"${BLUE}" "${RESET}"
+
+					deleteFSTabSwapPartitionLines || return 1
+						
+					deleteFSTabSwapFileLines || return 1
+				}	
+
+				setFSTabSwapFile "${_swapFile}"
+			}
+
+		} || {
+			printf >&2 \
+				"%s[+] Swap File's Line not found on %s %s\n" \
+				"${RED}" "${_fstabFile}" "${RESET}"
+
+			printf \
+				"%s[+] Existing Swap's Line[s] on %s are related to Partitions Then%s\n" \
+				"${PURPLE}" "${_fstabFile}" "${RESET}"
+
+			[[ -n $_mode ]] && {
+
+				(( $_mode == 3 )) && { deleteFSTabSwapPartitionLines || return 1 ; }
+
+				setFSTabSwapFile "${_swapFile}"
+			}
+		}
+
+	else
+		printf >&2 \
+			"%s[!] Previously mentioned Swap Line does not exist %s\n " \
+			"${RED}" "${RESET}"
+
+		setFSTabSwapFile "${_swapFile}"
+	fi
+
+
+	printf \
+		"\n%s[+] Checking System's Swappiness Value...%s \n" \
 		"${BLUE}" "${RESET}"
 
 	[[ -e $_sysctlFile && -e $_swappinessFile ]] && { \
@@ -947,14 +1171,14 @@ createSwap(){
 				"${BLUE}" "${_sysctlFile}" "${RESET}"
 			printf \
 				"\nvm.swappiness=10\n" \
-				>> /etc/sysctl.conf
+				>> "${_sysctlFile}"
 			
 			(( $? == 0 )) && {
 
 				sysctl --load &> /dev/null && {
 
 					printf \
-						"%s[+] Swappiness Parameter configured correctly %s\n" \
+						"%s[+] Swappiness Parameter seems configured correctly %s\n" \
 						"${GREEN}" "${RESET}"
 				} || {
 					printf >&2 \
@@ -966,39 +1190,67 @@ createSwap(){
 			printf \
 				"%s[+] Swappiness Parameter found on %s file %s\n" \
 				"${GREEN}" "${_sysctlFile}" "${RESET}"
+
 			printf \
-				"%s[+] Modifying Swappiness Parameter on %s...%s\n" \
-				"${BLUE}" "${_sysctlFile}" "${RESET}"
+				"%s[+] Checking if Swappiness Parameter's Value is 10...%s\n" \
+				"${BLUE}" "${RESET}"
+
+			grep --quiet \
+			     --ignore-case \
+			     --perl-regexp \
+			     '^vm\.swappiness=10$' \
+			     "${_sysctlFile}"
 			
-			{ sed --regexp-extended \
-			    --in-place \
-			    's@(^vm\.swappiness=)[0-9]{1,3}@\110@g' \
-			    /etc/sysctl.conf && \
+			(( $? != 0 )) && {
 
-			sysctl --load &> /dev/null ; }
+				printf >&2 \
+					"%s[+] Swappiness Parameter's Value is different from ideal value ( 10 ) %s\n" \
+					"${RED}" "${RESET}"
 
-			(( $? == 0 )) && { printf \
-						"%s[+] Swappiness Parameter modified on %s %s \n" \
+				printf \
+					"%s[+] Modifying Swappiness Parameter on %s...%s\n" \
+					"${BLUE}" "${_sysctlFile}" "${RESET}"
+				
+				{ sed --regexp-extended \
+				    --in-place \
+				    's@(^vm\.swappiness=)[0-9]{1,3}@\110@g' \
+				    "${_sysctlFile}" && \
+
+				sysctl --load &> /dev/null ; }
+
+				(( $? == 0 )) && { 
+
+					printf \
+						"%s[+] Seems like Swappiness Parameter was modified on %s %s \n" \
 						"${GREEN}" "${_sysctlFile}" "${RESET}"
-					 } || { printf >&2 \
-						 	"%s[!] Unable to modify Swappiness Parameter :( on %s %s\n" \
-							"${RED}" "${_sysctlFile}" "${RESET}" ; }
+
+				} || {
+					printf >&2 \
+						"%s[!] Unable to modify Swappiness Parameter :( on %s %s\n" \
+						"${RED}" "${_sysctlFile}" "${RESET}"
+				}
+			} || {
+				printf >&2 \
+					"%s[+] Swappines Parameter's Value is correct ( 10 ) on %s %s \n" \
+					"${GREEN}" "${_sysctlFile}" "${RESET}"
+			}
+
+		fi
 			printf \
 				"%s[+] Checking System's Swappiness Value on %s...%s\n" \
 				"${BLUE}" "${_hostname}" "${RESET}"
 			
-			local _swappiness="$( cat ${_swappinessFile} )"		
+			_swappiness="$( cat ${_swappinessFile} )"		
 
 			(( $_swappiness == 10 )) && { 
 
 				printf \
-					"%s[+] Changes applied correctly. Swappiness value -> %s on %s %s\n" \
-					"${GREEN}" "${_swappiness}" "${_hostname}" "${RESET}"
-			} || printf >&2 \
-					"%s[!] Changes related to Swappiness has not been applied correctly on %s %s\n" \
-					"${RED}" "${_hostname}" "${RESET}"
-		fi
+					"%s[+] Swappiness value on %s -> %s %s\n" \
+					"${GREEN}" "${_hostname}" "${_swappiness}" "${RESET}"
 
+			} || printf >&2 \
+					"%s[!] Changes related to Swappiness have not been applied correctly on %s %s\n" \
+					"${RED}" "${_hostname}" "${RESET}"
 	} || printf >&2 \
 			"%s[!] Seems like %s or %s file does not exist on %s %s\n" \
 			"${RED}" "${_sysctlFile}" "${_swappinessFile}" "${_hostname}" "${RESET}"
@@ -1010,7 +1262,7 @@ getDiskUsage(){
 	local _hostname=$( hostname --long )
 
 	printf \
-		"%s[+] Checking Disk Usage on %s... %s\n" \
+		"\n%s[+] Checking Disk Usage on %s... %s\n" \
 		"${BLUE}" "${_hostname}" "${RESET}"
 
 	_diskUsage=$( awk \
@@ -1075,17 +1327,20 @@ getSwapExpectedValue(){
 }
 
 setSwap(){
-	local _memTotal=$1 _swapTotal=$2 _swapFile="/swapfile" _swapExpectedValue _diff _num
+	local _memTotal=$1 _swapTotal=$2 _swapFile="/swapfile" _swapExpectedValue _diff _num _file
 	local _hostname=$( hostname --long )
+	local -A _deletedSwapFiles=()
 
 	_swapExpectedValue=$( getSwapExpectedValue "${_memTotal}" 3>&1 1>&2 || return 1 )
 
 	_diff=$( awk ' { printf "%.2f\n" , $1 - $2 } ' <<< "${_swapExpectedValue} ${_swapTotal}" )
 
 	printf \
-		"%s[+] Missing Swap Value to be allocated on %s -> %sG %s\n" \
+		"%s[+] Remaining | Excess Swap Value identified on %s -> %sG %s\n" \
 		"${PURPLE}" "${_hostname}" "${_diff/-/+}" "${RESET}"
 
+	# MODE 1
+	
 	awk ' { exit ( $1 >= 1 ? 0 : 1 ) } ' <<< "${_diff}" && {
 		
 		printf \
@@ -1119,7 +1374,7 @@ setSwap(){
 				}
 			done
 
-			createSwap "${_diff}" "${_swapFile}${_num}" && {
+			createSwap "${_diff}" "${_swapFile}${_num}" "1" && {
 
 				printf >&3 "%s\n" "${_swapFile}${_num}"
 
@@ -1132,9 +1387,11 @@ setSwap(){
 				"%s[!] %s does not exists on %s %s \n" \
 				"${PURPLE}" "${_swapFile}" "${_hostname}" "${RESET}"
 			
-			createSwap "${_diff}" "${_swapFile}" && return 0 || return 1
+			createSwap "${_diff}" "${_swapFile}" "1" && return 0 || return 1
 		}
 	}
+
+	# MODE 2
 
 	awk ' { exit ( $1 >= -1 && $1 <= 1 ? 0 : 1 ) } ' <<< "${_diff}" && {
 
@@ -1145,11 +1402,31 @@ setSwap(){
 		return 10
 	}
 
+	# MODE 3
+
 	awk ' { exit ( $1 < -1 ? 0 : 1 ) } ' <<< "${_diff}" && {
 
 		printf >&2 \
 			"%s[!] Warning: Allocated Memory is above its optimal value ( %sG ) %s \n" \
 			"${PURPLE}" "${_swapExpectedValue}" "${RESET}"
+
+		printf \
+			"\n%s[+] Extracting Enabled Swap Files on %s...%s\n" \
+			"${BLUE}" "${_hostname}" "${RESET}"
+
+		while read -r _file ; do
+
+			[[ -f $_file ]] && _deletedSwapFiles["${_file}"]=""
+			
+		done < <(
+				awk \
+					' { if ( $2 == "file" ) \
+					  print $1 } ' <(
+								swapon --show \
+								       --noheadings \
+								       --raw
+							)
+			)
 
 		printf \
 			"%s[+] Disabling all System's Swap ( %sG )...%s\n" \
@@ -1161,38 +1438,67 @@ setSwap(){
 				"%s[+] Swap on %s disabled correctly %s\n" \
 				"${GREEN}" "${_hostname}" "${RESET}"
 
-			if [[ -e $_swapFile ]] ; then
+			if (( "${#_deletedSwapFiles[@]}" >= 1 )) ; then
 
 				printf \
-					"%s[+] Trying to delete %s...%s\n" \
-					"${BLUE}" "${_swapFile}" "${RESET}"
+					"%s[+] Swap Files Found on %s -> %s %s\n" \
+					"${PURPLE}" "${_hostname}" "${#_deletedSwapFiles[@]}" "${RESET}"
 
-				rm --recursive --force "${_swapFile}" && {
+				for _file in "${!_deletedSwapFiles[@]}" ; do
 
-					[[ ! -e $_swapFile ]] && {
+					printf \
+						"\n%s[+] Trying to delete %s...%s\n" \
+						"${BLUE}" "${_file}" "${RESET}"
 
-						printf \
-							"%s[+] %s deleted correctly :) %s\n" \
-							"${GREEN}" "${_swapFile}" "${RESET}"
+					rm --recursive --force "${_file}" && {
+
+						[[ ! -e $_file ]] && {
+
+							printf \
+								"%s[+] %s deleted correctly :) %s\n" \
+								"${GREEN}" "${_file}" "${RESET}"
+						} || {
+							printf >&2 \
+								"%s[!] Could not delete %s :( . Try it manually %s\n" \
+								"${RED}" "${_file}" "${RESET}"
+							
+							return 1
+						}
+
 					} || {
 						printf >&2 \
-							"%s[!] Could not delete %s :( . Try it manually %s\n" \
-							"${RED}" "${_swapFile}" "${RESET}"
+							"%s[!] An error has occurred trying to delete %s :( . Try it manually %s\n" \
+							"${RED}" "${_file}" "${RESET}"
 						
 						return 1
 					}
+				done
 
-				} || {
-					printf >&2 \
-						"%s[!] An error has occurred trying to delete %s :( . Try it manually %s\n" \
-						"${RED}" "${_swapFile}" "${RESET}"
-					
-					return 1
-				}
+				cat << TABLE
+${BLUE}
+╔═════════════════════════════════════════╗
+║           Deleted Swap File[s]          ║	
+╠═════════════════════════════════════════╣ ${RESET}
+TABLE
 
+				for _file in "${!_deletedSwapFiles[@]}" ; do
+
+					printf \
+						"%s║  %s %s\n" \
+					        "${BLUE}" "${_file}" "${RESET}"
+
+					printf \
+						"%s╚═════════════════════════════════════════╝%s\n" \
+						"${BLUE}" "${RESET}"
+				done
+
+			else
+				printf \
+					"%s[+] No Swap Files were Found on %s %s\n" \
+					"${PURPLE}" "${_hostname}" "${RESET}"
 			fi
 
-			createSwap "${_swapExpectedValue}" "${_swapFile}" && return 0 || return 1
+			createSwap "${_swapExpectedValue}" "${_swapFile}" "3" && return 0 || return 1
 
 		} || {
 			printf >&2 \
@@ -1208,10 +1514,6 @@ makeSwap(){
 	local _memTotal=$1 _swapTotal=$2 _buffers=$3 _setSwapStatus
 	local _diskUsage _swapFile="/swapfile" _hostname=$( hostname --fqdn )
 	local _swappiness=$( cat /proc/sys/vm/swappiness )
-
-	printf \
-		"\n%s[+] Checking Disk Usage on %s %s\n" \
-		"${BLUE}" "${_hostname}" "${RESET}"
 
 	_diskUsage=$( getDiskUsage 3>&1 1>&2 || return 1 )
 
