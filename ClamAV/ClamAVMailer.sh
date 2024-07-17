@@ -1,4 +1,4 @@
-
+#!/usr/bin/env bash
 
 sigintHandler(){
 	printf >&2 \
@@ -59,6 +59,19 @@ showHelp(){
 		${0##*/}    --recipient john.doe@test.com    --path /var
 		${0##*/}    --recipient=john.doe@test.com    --path=./lib ${RESET}
 HELP
+}
+
+envSetup(){
+	local _fullPath="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	local _path
+
+	while IFS='' read -d ':' -r _path
+	do
+		[[ $PATH =~ (^|:)"$_path"(:|$) ]] || PATH+=":${_path}"
+
+	done <<< "${_fullPath}:"
+
+	export TERM=xterm-256color
 }
 
 checker(){
@@ -326,6 +339,8 @@ main(){
 
 	systemdChecker || exit 99
 
+	envSetup
+
 	checkClamAVDeps || exit 99
 
 	checkMailDeps
@@ -337,6 +352,8 @@ main(){
 			sendMail "${_binary}" "${_optArgs[recipient]}" "${_optArgs[path]}" && return 0 || exit 99
 		}	
 	done
+
+	env 
 }
 
 RED=$( tput setaf 1 )

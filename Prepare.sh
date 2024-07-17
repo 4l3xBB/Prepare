@@ -71,19 +71,6 @@ ${BLUE}
 TABLE
 }
 
-deletedSwapFiles(){
-	cat << TABLE
-${BLUE}
-╔═════════════════════════════════════════╗
-║           Deleted Swap Files        	  ║	
-╠═════════════════════════════════════════╣
-  ${1} 
-╚═════════════════════════════════════════╝ ${RESET}
-║
-╚═════════════════════════════════════════╝ ${RESET}
-TABLE
-}
-
 table(){
 	cat << TABLE
 	${PINK}
@@ -418,10 +405,15 @@ generatePleskAPIKey(){
 		"\n%s[+] Generating Plesk API REST's Secret Key for Admin User... %s\n" \
 		"${BLUE}" "${RESET}"
 	
-	(( $httpStatusCode != 201 )) && { printf >&2 \
-						"\n%s[!] Error creating API REST Secret Key. HTTP Status Code: %s %s\n" \
-						"${RED}" "${httpStatusCode}" "${RESET}"
-					  return 1 ; }
+	(( $httpStatusCode != 201 )) && {
+
+		printf >&2 \
+			"\n%s[!] Error creating API REST Secret Key. HTTP Status Code: %s %s\n" \
+			"${RED}" "${httpStatusCode}" "${RESET}"
+
+		  return 1
+	}
+
 	local apiSecretKey=$(
 
 		{ jq .key | grep -iPom 1 '\"\K[^\"]*' ; } <<< "${createKeyReq}"
@@ -430,6 +422,7 @@ generatePleskAPIKey(){
 	[[ -n $apiSecretKey ]] && printf >&2 \
 					"%s[+] Plesk API REST's Secret Key Generated correctly -> %s %s\n" \
 					"${GREEN}" "${apiSecretKey}" "${RESET}"
+
 	printf "%s\n" "${apiSecretKey}"
 
 }
@@ -2333,7 +2326,7 @@ clamAVMailerCrontab(){
 	local _userCrontab="crontab -u $( id -un ) -l" _userCrontabTemplate="./Assets/userCrontabTemplate.txt"
 	local _clamAVMailerCmdline
 
-	local _clamAVMailerCronLine="55\t23\t*\t*\t*\tbash ${_clamAVConfigDir}/${_clamAVMailer} --recipient ${_mailAccount} --path /\n"
+	local _clamAVMailerCronLine="55\t23\t*\t*\t*\tbash ${_clamAVConfigDir}/${_clamAVMailer} --recipient ${_mailAccount} --path / &> /dev/null\n"
 
 	(( $_status == 0 )) && {
 
