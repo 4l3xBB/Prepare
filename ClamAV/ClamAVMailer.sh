@@ -65,6 +65,8 @@ envSetup(){
 	local _fullPath="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 	local _path
 
+	[[ -z $PATH ]] && { PATH="$_fullPath" ; return 0 ; }
+
 	while IFS='' read -d ':' -r _path
 	do
 		[[ $PATH =~ (^|:)"$_path"(:|$) ]] || PATH+=":${_path}"
@@ -196,6 +198,10 @@ sendMail(){
 		"${BLUE}" "${_path}" "${_hostname}" "${RESET}"
 
 	find "${_path}" \
+	     \( -path /proc \
+	     -o -path /sys \) \
+	     -prune \
+	     -o \
 	     -type f \
 	     > "${_tmpFile}"
 	     2> /dev/null \
@@ -209,18 +215,17 @@ sendMail(){
 	       --invert-match \
 	       --perl-regexp \
 	       --text \
-	       ".*(Can\'t read file ERROR)\
-               |(Failed to open file)\
-	       |(Failed to determine real)\
-	       |(Quarantine of the file).*" < <( clamdscan --multiscan \
-							   --fdpass \
-						           --allmatch \
-							   --infected \
-							   --config-file="${_clamdConfigFile}" \
-							   --verbose \
-							   --file-list="${_tmpFile}" -- \
-							   2>/dev/null
-					       )		
+	       ".*(Can't read file ERROR|Failed to open file|Failed to determine real|Quarantine of the file).*" \
+	       < <( clamdscan --multiscan \
+			      --fdpass \
+			      --allmatch \
+			      --infected \
+		 	      --config-file="${_clamdConfigFile}" \
+			      --verbose \
+			      --file-list="${_tmpFile}" -- \
+			      2>/dev/null
+		  )		
+
 	} > "${_clamdScanFile}"
 
 	if [[ -s $_clamdScanFile ]] ; then

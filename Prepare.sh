@@ -294,6 +294,8 @@ checkTools(){
 		curl
 		base64
 		jq
+		mail
+		mailx
 		apt
 		fallocate
 		mkswap
@@ -2188,7 +2190,7 @@ clamAVInstall(){
 clamAVMailerSetup(){
 	local _hostname=$( hostname --long ) _clamAVConfigDir="${HOME}/.prepare" _clamAVMailer="ClamAVMailer.sh"
 	local _githubURL="https://raw.githubusercontent.com/4l3xBB/Prepare/main/ClamAV/ClamAVMailer.sh" _githubReq
-	local _mailAccount="info@prepare.com"
+	local _mailAccount="alertas@digitaldot.es"
 
 	printf \
 		"%s[+] Checking if %s Directory exists on %s...%s\n" \
@@ -2314,15 +2316,13 @@ userCrontabBackup(){
 		return 0
 	} || {
 		printf >&2 \
-			"%s[!] %s's Crontab Backup failed :( . Try to backup it manually %s\n" \
+			"%s[!] %s's Crontab is empty. Try -> crontab -u $( id -un ) -r to create new one %s\n" \
 			"${RED}" "$( id -un )" "${RESET}"
-
-		return 1
 	}
 }
 
 clamAVMailerCrontab(){
-	local _status=$1 _clamAVConfigDir="${HOME}/.prepare" _clamAVMailer="ClamAVMailer.sh" _mailAccount="info@prepare.com"
+	local _status=$1 _clamAVConfigDir="${HOME}/.prepare" _clamAVMailer="ClamAVMailer.sh" _mailAccount="alertas@digitaldot.es"
 	local _userCrontab="crontab -u $( id -un ) -l" _userCrontabTemplate="./Assets/userCrontabTemplate.txt"
 	local _clamAVMailerCmdline
 
@@ -3206,6 +3206,397 @@ sshdSetup(){
 		"${PURPLE}" "${_sshdConfig}" "${RESET}"
 }
 
+bashRCSkel(){
+	local _bashRCSkel="/etc/skel/.bashrc" _userBashRC="/root/.bashrc"
+	local _bashRCSkelLine="source ${_bashRCSkel}"
+	local -a _grepSkelLine=(
+
+		grep --quiet \
+		     --ignore-case \
+		     --perl-regexp \
+		     "^${_bashRCSkelLine}$" \
+		     "${_userBashRC}"		
+	)
+
+	printf \
+		"\n%s[+] Checking if Line related to %s's Directives exists on %s...%s\n" \
+		"${BLUE}" "${_bashRCSkel}" "${_userBashRC}" "${RESET}"
+
+	"${_grepSkelLine[@]}"
+	
+	(( $? != 0 )) && {
+
+		printf \
+			"%s[+] Mentioned line ( %s ) does not exist %s\n" \
+			"${RED}" "${_bashRCSkelLine}" "${RESET}"
+
+		printf \
+			"%s[+] Inserting Previous Line on %s...%s\n" \
+			"${BLUE}" "${_userBashRC}" "${RESET}"
+
+		printf "\n%s\n" "${_bashRCSkelLine}" 2> /dev/null >> "${_userBashRC}"
+
+		if "${_grepSkelLine[@]}" ; then
+
+			printf \
+				"%s[+] Line related to %s's Directives inserted correctly on %s :) %s\n" \
+				"${GREEN}" "${_bashRCSkel}" "${_userBashRC}" "${RESET}"
+
+			return 0
+		else
+			printf >&2 \
+				"%s[!] Could not insert Line related to %s's Directives on %s :( %s \n" \
+				"${RED}" "${_bashRCSkel}" "${_userBashRC}" "${RESET}"
+
+			return 1
+		fi
+	} || {
+		printf \
+			"%s[+] Mentioned Line ( %s ) already exists :) %s\n" \
+			"${GREEN}" "${_bashRCSkelLine}" "${RESET}"
+		
+		return 0
+	}
+}
+
+mailAliasSetup()
+{
+	local _aliasFile="/etc/aliases" _hostname=$( hostname --long )
+	local _mailRegex='\w+(?:[\.\_\-%\+]\w+)*@\w+(?:[\.\-]\w+)*\.\w{2,}'
+	local _grepAliases=(
+
+		grep --quiet \
+		     --ignore-case \
+		     --perl-regexp \
+		     "^root:\s?${_mailRegex}$" \
+		     "${_aliasFile}"
+
+	)
+
+	local _aliasBlock="$( cat << CONTENT
+
+### MAIL ALIASES -> $( hostname --long ) ###
+
+# See man 5 aliases for format
+
+########################################
+#####  ALIASES TO LOCAL ACCOUNTS  ######
+########################################
+
+postmaster: root
+amavis: root
+clamav: root
+
+########################################
+##### ALIASES TO EXTERNAL ACCOUNTS #####
+########################################
+
+root: alertas@digitaldot.es
+
+########################################
+#####  ALIASES TO EXTERNAL FILES  ######
+########################################
+
+
+########################################
+####  ALIASES TO COMMANDS|BINARIES  ####
+########################################
+
+
+CONTENT
+	)"
+
+	printf >&2 \
+		"\n%s[+] Creating %s File with Necessary Alias on %s...%s\n" \
+		"${BLUE}" "${_aliasFile}" "${_hostname}" "${RESET}"
+
+	printf "%s" "${_aliasBlock}" 2> /dev/null > "${_aliasFile}"
+
+	printf \
+		"%s[+] It seems like %s File has been created...%s\n" \
+		"${BLUE}" "${_aliasFile}" "${RESET}"
+
+	printf \
+		"\n%s[+] Checking its Existence and Content...%s\n" \
+		"${BLUE}" "${RESET}"
+
+	[[ -s $_aliasFile ]] && "${_grepAliases[@]}" && {
+
+		printf \
+			"%s[+] All Mail Aliases Set Up Correctly on %s :) %s\n" \
+			"${GREEN}" "${_hostname}" "${RESET}"
+
+		return 0
+
+	} || {
+		printf >&2 \
+			"%s[!] Something went Wrong trying to Set Up %s's Mail Aliases :( %s\n" \
+			"${RED}" "${_hostname}" "${RESET}"
+		
+		return 1
+	}
+}
+
+mailAlertSetup(){
+	local _userBashRC="/root/.bashrc" _hostname=$( hostname --long ) _aliasFile="/etc/aliases"
+	local _prepareDir="/root/.prepare" _backupFile
+	local -a _grepMailAlertBlock=(
+
+		grep --quiet \
+		     --ignore-case \
+		     --perl-regexp \
+		     '.*Root Shell Access from \$\{_ip\} on \$\( hostname \) Server' \
+		     "${_userBashRC}"
+	)
+
+	local _mailAlertComm="$( cat << 'COMMAND'
+		
+# ROOT SHELL ACCESS'S MAIL ALERT
+
+declare -A _IPs=()
+declare -a _ipAddrs=( $(
+	
+	awk \
+	    ' NR > 2 { print ( $1 == "root" ? $3 : "" ) } ' \
+	    <( w )
+) )
+
+for _ip in "${_ipAddrs[@]}"
+do
+	[[ -v _IPs[${_ip}] ]] || _IPs["${_ip}"]=""
+done
+
+for _ip in "${!_IPs[@]}"
+do
+	mailx -s \
+	      "Alert: Root Shell Access from ${_ip} on $( hostname ) Server" \
+	      root \
+	      <<< "ALERT - Root Shell Access on $( hostname ) at $( date ) from ${_ip}"
+done
+		
+COMMAND
+	)"
+
+	printf \
+		"\n%s[+] Let\'s Check if Mail Aliases are established correctly on %s %s...\n" \
+		"${BLUE}" "${_hostname}" "${RESET}"
+
+	printf \
+		"%s[+] Checking if %s File exists on %s...%s\n" \
+		"${BLUE}" "${_aliasFile}" "${_hostname}" "${RESET}"
+
+	[[ -e $_aliasFile ]] && {
+
+		printf \
+			"%s[+] %s exists on %s %s\n" \
+			"${PURPLE}" "${_aliasFile}" "${_hostname}" "${RESET}"
+
+		printf \
+			"\n%s[+] Creating Current %s's Backup as %s.bk on %s...%s\n" \
+			"${BLUE}" "${_aliasFile}" "${_aliasFile##*/}" "${_prepareDir}" "${RESET}"
+
+		[[ -e $_prepareDir ]] || mkdir "${_prepareDir}" 2> /dev/null
+
+		[[ -e ${_prepareDir}/${_aliasFile##*/}.bk ]] && {
+
+			printf >&2 \
+				"%s[*] %s.bk already exists on %s %s\n" \
+				"${PURPLE}" "${_aliasFile##*/}" "${_prepareDir}" "${RESET}"
+
+			for i in {1..5}
+			do
+				[[ -e ${_prepareDir}/${_aliasFile##*/}${i}.bk ]] && {
+
+					(( $i < 5 )) && continue || {
+
+						printf >&2 \
+							"%s[!] Several %s's Backups exist on %s. Check them and delete if They're not necessary %s\n" \
+							"${PURPLE}" "${_aliasFile}" "${_prepareDir}" "${RESET}"
+
+						return 1
+					}
+				}
+				
+				_backupFile="${_aliasFile##*/}${i}.bk"
+				
+				cp "${_aliasFile}" "${_prepareDir}/${_backupFile}" 2> /dev/null && break
+			done
+		} || {
+			_backupFile="${_aliasFile##*/}.bk"
+
+			cp "${_aliasFile}" "${_prepareDir}/${_backupFile}" 2> /dev/null
+		}
+
+		(( $? == 0 )) && {
+
+			printf \
+				"%s[+] It seems like %s's Backup has been generated...%s\n" \
+				"${BLUE}" "${_aliasFile}" "${RESET}"
+
+			printf \
+				"\n%s[+] Checking %s existence on %s...%s\n" \
+				"${BLUE}" "${_backupFile}" "${_hostname}" "${RESET}"
+
+			[[ -e ${_prepareDir}/${_backupFile} ]] && {
+
+				printf \
+					"%s[+] %s exists on %s. %s's Backup created successfully then :) %s\n" \
+					"${GREEN}" "${_backupFile}" "${_prepareDir}" "${_aliasFile}" "${RESET}"
+					
+				mailAliasSetup || return 1		
+
+			} || {
+				printf >&2 \
+					"%s[!] %s does not exist on %s. Could not create %s's Backup then :( %s\n" \
+					"${RED}" "${_backupFile}" "${_prepareDir}" "${_aliasFile}" "${RESET}"
+
+				return 1
+			}
+
+		} || {
+			printf >&2 \
+				"%s[!] Something went wrong trying to Create %s's Backup :( %s\n" \
+				"${RED}" "${_aliasFile}" "${RESET}"
+
+			return 1
+		}
+
+	} || {
+		printf >&2 \
+			"%s[!] %s does not exist on %s :( \n" \
+			"${RED}" "${_hostname}" "${RESET}"
+
+		mailAliasSetup || return 1
+	}
+
+	printf \
+		"\n%s[+] Checking if Root Shell Access's Mail Alert Block exists on %s...%s\n" \
+		"${BLUE}" "${_userBashRC}" "${RESET}"
+
+	"${_grepMailAlertBlock[@]}"
+
+	(( $? != 0 )) && {
+
+		printf \
+			"%s[!] Root Shell Access's Alerts are not Set Up on %s :( %s\n" \
+			"${RED}" "${_hostname}" "${RESET}"
+
+		printf \
+			"%s[+] Adding Mail Alert Block to %s File...%s\n" \
+			"${BLUE}" "${_userBashRC##*/}" "${RESET}"
+
+		printf "%s" "${_mailAlertComm}" 2> /dev/null >> "${_userBashRC}" && {
+
+			printf \
+				"%s[+] It seems like Mail Alert Block has been inserted...%s\n" \
+				"${BLUE}" "${RESET}"
+
+		} || {
+			printf >&2 \
+				"%s[!] Something went wrong trying to insert previous line :( %s\n" \
+				"${RED}" "${RESET}"
+
+			return 1
+		}
+
+		printf \
+			"\n%s[+] Checking Mail Alert Block's Adition on %s...%s\n" \
+			"${BLUE}" "${_userBashRC}" "${RESET}"
+
+		"${_grepMailAlertBlock[@]}" && {
+
+			printf \
+				"%s[+] Mail Alert Block inserted correctly :) %s\n" \
+				"${GREEN}" "${RESET}"
+
+			printf \
+				"%s[+] Root Shell Access's Alerts are Set Up then on %s %s\n" \
+				"${GREEN}" "${_hostname}" "${RESET}"
+
+			return 0
+
+		} || {
+			printf >&2
+				"%s[!] Could not insert Mail Alert Block :( %s\n" \
+				"${RED}" "${RESET}"
+
+			return 1
+		}
+
+	} || {
+		printf \
+			"%s[+] Root Shell Access's Alerts are already Set Up on %s :) %s\n" \
+			"${GREEN}" "${_hostname}" "${RESET}"
+		
+		return 0
+	}
+
+}
+
+bashRCSetup(){
+	local _hostname=$( hostname --long ) _bashRCSkel="/etc/skel/.bashrc"
+	local _bashRCSkelLine="source ${_bashRCSkel}"
+	local _userBashRC="/root/.bashrc"
+
+	[[ -e $_bashRCSkel ]] || {
+
+		printf >&2 \
+			"\n%s[!] %s does not exist on %s :( %s\n" \
+			"${RED}" "${_bashRCSkel}" "${_hostname}" "${RED}"
+
+		return 1
+	}
+
+	printf \
+		"\n%s[+] Checking if %s exists on %s Path...%s\n" \
+		"${BLUE}" "${_bashRCSkel##*/}" "${HOME}" "${RESET}"
+
+	[[ ! -e $_userBashRC ]] && {
+		
+		printf >&2 \
+			"%s[!] %s does not exist on %s %s\n" \
+			"${RED}" "${_bashRCSkel##*/}" "${HOME}" "${RESET}"
+
+		printf \
+			"\n%s[+] Creating %s File and Adding Line related to %s's Directives on it...%s\n" \
+			"${BLUE}" "${_userBashRC}" "${_bashRCSkel}" "${RESET}"
+
+		printf "\n%s\n" "${_bashRCSkelLine}" 2> /dev/null >> "${_userBashRC}"
+
+		printf \
+			"%s[+] It seems like %s has been created%s\n" \
+			"${BLUE}" "${_userBashRC}" "${RESET}"
+
+		printf \
+			"\n%s[+] Checking %s File creation...%s\n" \
+			"${BLUE}" "${_userBashRC}" "${RESET}"
+
+		if [[ -e $_userBashRC ]] ; then
+
+			printf \
+				"%s[+] %s File created correctly on %s :) %s\n" \
+				"${GREEN}" "${_userBashRC##*/}" "${HOME}" "${RESET}"
+		else
+			printf >&2 \
+				"%s[+] Could not create %s on %s :(\n" \
+				"${RED}" "${_userBashRC##*/}" "${HOME}" "${RESET}"
+
+			return 1
+		fi
+
+		bashRCSkel || return 1
+		
+	} || {
+		printf \
+			"%s[+] %s exists on %s %s\n" \
+			"${GREEN}" "${_bashRCSkel##*/}" "${HOME}" "${RESET}"
+		
+		bashRCSkel || return 1
+	}
+
+	mailAlertSetup || return 1	
+}
+
 main(){
 	local -A flags=()
 	local -A optArgs=()
@@ -3303,31 +3694,36 @@ ADVISE
 
 	table "Specific Checking Section"
 
-	checkService 		|| exit 1
+	checkService || exit 1
 
-# 	table " Plesk Email Security"
-# 
-# 	pleskEmailSecurity "${_pleskSecretKey}" || exit 1
-# 
-# 	table " Amavis - SpamAssassin"
-# 
-# 	amavisdSpamdChecker || exit 1
-# 
+ 	table " Plesk Email Security"
+ 
+ 	pleskEmailSecurity "${_pleskSecretKey}" || exit 1
+ 
+ 	table " Amavis - SpamAssassin"
+ 
+ 	amavisdSpamdChecker || exit 1
+ 
  	table "     Memory - Swap"
  
  	makeSwap $( getMemoryInfo ) || exit 1	# $( Function ) : FD 1 -> Temporal Buffer -> Variable ; FD 2 -> Screen
-# 
-# 	table "MySQL Ramdisk - Checking"
-# 
-# 	mySQLRamDisk || exit 1
-# 
-# 	table "ClamAV Suite Section"
-# 
-# 	clamAVSetup || exit 1
-#
-#	table "SSH Service Setup Section"
-#
-#	sshdSetup || exit 1
+ 
+ 	table "MySQL Ramdisk - Checking"
+ 
+ 	mySQLRamDisk || exit 1
+ 
+ 	table "ClamAV Suite Section"
+ 
+ 	clamAVSetup || exit 1
+
+	table "SSH Service Setup Section"
+
+	sshdSetup || exit 1
+
+	table ".BashRC's ${USER^} Setup Section"
+
+	bashRCSetup || exit 1
+
 }
 
 RESET=$(tput sgr0)
